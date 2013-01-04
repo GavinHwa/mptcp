@@ -1400,13 +1400,11 @@ static void team_destructor(struct net_device *dev)
 
 static int team_open(struct net_device *dev)
 {
-	netif_carrier_on(dev);
 	return 0;
 }
 
 static int team_close(struct net_device *dev)
 {
-	netif_carrier_off(dev);
 	return 0;
 }
 
@@ -1502,7 +1500,6 @@ static int team_set_mac_address(struct net_device *dev, void *p)
 	if (dev->type == ARPHRD_ETHER && !is_valid_ether_addr(addr->sa_data))
 		return -EADDRNOTAVAIL;
 	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
-	dev->addr_assign_type &= ~NET_ADDR_RANDOM;
 	rcu_read_lock();
 	list_for_each_entry_rcu(port, &team->port_list, list)
 		if (team->ops.port_change_dev_addr)
@@ -1772,7 +1769,6 @@ static void team_setup_by_port(struct net_device *dev,
 	dev->mtu = port_dev->mtu;
 	memcpy(dev->broadcast, port_dev->broadcast, port_dev->addr_len);
 	memcpy(dev->dev_addr, port_dev->dev_addr, port_dev->addr_len);
-	dev->addr_assign_type &= ~NET_ADDR_RANDOM;
 }
 
 static int team_dev_type_check_change(struct net_device *dev,
@@ -2560,21 +2556,43 @@ send_event:
 
 }
 
+static void __team_carrier_check(struct team *team)
+{
+	struct team_port *port;
+	bool team_linkup;
+
+	team_linkup = false;
+	list_for_each_entry(port, &team->port_list, list) {
+		if (port->linkup) {
+			team_linkup = true;
+			break;
+		}
+	}
+
+	if (team_linkup)
+		netif_carrier_on(team->dev);
+	else
+		netif_carrier_off(team->dev);
+}
+
 static void __team_port_change_check(struct team_port *port, bool linkup)
 {
 	if (port->state.linkup != linkup)
 		__team_port_change_send(port, linkup);
+	__team_carrier_check(port->team);
 }
 
 static void __team_port_change_port_added(struct team_port *port, bool linkup)
 {
 	__team_port_change_send(port, linkup);
+	__team_carrier_check(port->team);
 }
 
 static void __team_port_change_port_removed(struct team_port *port)
 {
 	port->removed = true;
 	__team_port_change_send(port, false);
+	__team_carrier_check(port->team);
 }
 
 static void team_port_change_check(struct team_port *port, bool linkup)
