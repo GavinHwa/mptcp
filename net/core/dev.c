@@ -1857,6 +1857,228 @@ static void netif_setup_tc(struct net_device *dev, unsigned int txq)
 	}
 }
 
+#ifdef CONFIG_XPS
+static DEFINE_MUTEX(xps_map_mutex);
+#define xmap_dereference(P)		\
+	rcu_dereference_protected((P), lockdep_is_held(&xps_map_mutex))
+
+static struct xps_map *remove_xps_queue(struct xps_dev_maps *dev_maps,
+					int cpu, u16 index)
+{
+	struct xps_map *map = NULL;
+	int pos;
+
+	if (dev_maps)
+		map = xmap_dereference(dev_maps->cpu_map[cpu]);
+
+	for (pos = 0; map && pos < map->len; pos++) {
+		if (map->queues[pos] == index) {
+			if (map->len > 1) {
+				map->queues[pos] = map->queues[--map->len];
+			} else {
+				RCU_INIT_POINTER(dev_maps->cpu_map[cpu], NULL);
+				kfree_rcu(map, rcu);
+				map = NULL;
+			}
+			break;
+		}
+	}
+
+	return map;
+}
+
+static void netif_reset_xps_queues_gt(struct net_device *dev, u16 index)
+{
+	struct xps_dev_maps *dev_maps;
+	int cpu, i;
+	bool active = false;
+
+	mutex_lock(&xps_map_mutex);
+	dev_maps = xmap_dereference(dev->xps_maps);
+
+	if (!dev_maps)
+		goto out_no_maps;
+
+	for_each_possible_cpu(cpu) {
+		for (i = index; i < dev->num_tx_queues; i++) {
+			if (!remove_xps_queue(dev_maps, cpu, i))
+				break;
+		}
+		if (i == dev->num_tx_queues)
+			active = true;
+	}
+
+	if (!active) {
+		RCU_INIT_POINTER(dev->xps_maps, NULL);
+		kfree_rcu(dev_maps, rcu);
+	}
+
+	for (i = index; i < dev->num_tx_queues; i++)
+		netdev_queue_numa_node_write(netdev_get_tx_queue(dev, i),
+					     NUMA_NO_NODE);
+
+out_no_maps:
+	mutex_unlock(&xps_map_mutex);
+}
+
+static struct xps_map *expand_xps_map(struct xps_map *map,
+				      int cpu, u16 index)
+{
+	struct xps_map *new_map;
+	int alloc_len = XPS_MIN_MAP_ALLOC;
+	int i, pos;
+
+	for (pos = 0; map && pos < map->len; pos++) {
+		if (map->queues[pos] != index)
+			continue;
+		return map;
+	}
+
+	/* Need to add queue to this CPU's existing map */
+	if (map) {
+		if (pos < map->alloc_len)
+			return map;
+
+		alloc_len = map->alloc_len * 2;
+	}
+
+	/* Need to allocate new map to store queue on this CPU's map */
+	new_map = kzalloc_node(XPS_MAP_SIZE(alloc_len), GFP_KERNEL,
+			       cpu_to_node(cpu));
+	if (!new_map)
+		return NULL;
+
+	for (i = 0; i < pos; i++)
+		new_map->queues[i] = map->queues[i];
+	new_map->alloc_len = alloc_len;
+	new_map->len = pos;
+
+	return new_map;
+}
+
+int netif_set_xps_queue(struct net_device *dev, struct cpumask *mask, u16 index)
+{
+	struct xps_dev_maps *dev_maps, *new_dev_maps = NULL;
+	struct xps_map *map, *new_map;
+	int maps_sz = max_t(unsigned int, XPS_DEV_MAPS_SIZE, L1_CACHE_BYTES);
+	int cpu, numa_node_id = -2;
+	bool active = false;
+
+	mutex_lock(&xps_map_mutex);
+
+	dev_maps = xmap_dereference(dev->xps_maps);
+
+	/* allocate memory for queue storage */
+	for_each_online_cpu(cpu) {
+		if (!cpumask_test_cpu(cpu, mask))
+			continue;
+
+		if (!new_dev_maps)
+			new_dev_maps = kzalloc(maps_sz, GFP_KERNEL);
+		if (!new_dev_maps)
+			return -ENOMEM;
+
+		map = dev_maps ? xmap_dereference(dev_maps->cpu_map[cpu]) :
+				 NULL;
+
+		map = expand_xps_map(map, cpu, index);
+		if (!map)
+			goto error;
+
+		RCU_INIT_POINTER(new_dev_maps->cpu_map[cpu], map);
+	}
+
+	if (!new_dev_maps)
+		goto out_no_new_maps;
+
+	for_each_possible_cpu(cpu) {
+		if (cpumask_test_cpu(cpu, mask) && cpu_online(cpu)) {
+			/* add queue to CPU maps */
+			int pos = 0;
+
+			map = xmap_dereference(new_dev_maps->cpu_map[cpu]);
+			while ((pos < map->len) && (map->queues[pos] != index))
+				pos++;
+
+			if (pos == map->len)
+				map->queues[map->len++] = index;
+#ifdef CONFIG_NUMA
+			if (numa_node_id == -2)
+				numa_node_id = cpu_to_node(cpu);
+			else if (numa_node_id != cpu_to_node(cpu))
+				numa_node_id = -1;
+#endif
+		} else if (dev_maps) {
+			/* fill in the new device map from the old device map */
+			map = xmap_dereference(dev_maps->cpu_map[cpu]);
+			RCU_INIT_POINTER(new_dev_maps->cpu_map[cpu], map);
+		}
+
+	}
+
+	rcu_assign_pointer(dev->xps_maps, new_dev_maps);
+
+	/* Cleanup old maps */
+	if (dev_maps) {
+		for_each_possible_cpu(cpu) {
+			new_map = xmap_dereference(new_dev_maps->cpu_map[cpu]);
+			map = xmap_dereference(dev_maps->cpu_map[cpu]);
+			if (map && map != new_map)
+				kfree_rcu(map, rcu);
+		}
+
+		kfree_rcu(dev_maps, rcu);
+	}
+
+	dev_maps = new_dev_maps;
+	active = true;
+
+out_no_new_maps:
+	/* update Tx queue numa node */
+	netdev_queue_numa_node_write(netdev_get_tx_queue(dev, index),
+				     (numa_node_id >= 0) ? numa_node_id :
+				     NUMA_NO_NODE);
+
+	if (!dev_maps)
+		goto out_no_maps;
+
+	/* removes queue from unused CPUs */
+	for_each_possible_cpu(cpu) {
+		if (cpumask_test_cpu(cpu, mask) && cpu_online(cpu))
+			continue;
+
+		if (remove_xps_queue(dev_maps, cpu, index))
+			active = true;
+	}
+
+	/* free map if not active */
+	if (!active) {
+		RCU_INIT_POINTER(dev->xps_maps, NULL);
+		kfree_rcu(dev_maps, rcu);
+	}
+
+out_no_maps:
+	mutex_unlock(&xps_map_mutex);
+
+	return 0;
+error:
+	/* remove any maps that we added */
+	for_each_possible_cpu(cpu) {
+		new_map = xmap_dereference(new_dev_maps->cpu_map[cpu]);
+		map = dev_maps ? xmap_dereference(dev_maps->cpu_map[cpu]) :
+				 NULL;
+		if (new_map && new_map != map)
+			kfree(new_map);
+	}
+
+	mutex_unlock(&xps_map_mutex);
+
+	kfree(new_dev_maps);
+	return -ENOMEM;
+}
+EXPORT_SYMBOL(netif_set_xps_queue);
+
+#endif
 /*
  * Routine to help set real_num_tx_queues. To avoid skbs mapped to queues
  * greater then real_num_tx_queues stale skbs on the qdisc must be flushed.
@@ -1880,8 +2102,12 @@ int netif_set_real_num_tx_queues(struct net_device *dev, unsigned int txq)
 		if (dev->num_tc)
 			netif_setup_tc(dev, txq);
 
-		if (txq < dev->real_num_tx_queues)
+		if (txq < dev->real_num_tx_queues) {
 			qdisc_reset_all_tx_gt(dev, txq);
+#ifdef CONFIG_XPS
+			netif_reset_xps_queues_gt(dev, txq);
+#endif
+		}
 	}
 
 	dev->real_num_tx_queues = txq;
@@ -2495,41 +2721,69 @@ static inline int get_xps_queue(struct net_device *dev, struct sk_buff *skb)
 #endif
 }
 
+u16 __netdev_pick_tx(struct net_device *dev, struct sk_buff *skb)
+{
+	struct sock *sk = skb->sk;
+	int queue_index = sk_tx_queue_get(sk);
+
+	if (queue_index < 0 || skb->ooo_okay ||
+	    queue_index >= dev->real_num_tx_queues) {
+		int new_index = get_xps_queue(dev, skb);
+		if (new_index < 0)
+			new_index = skb_tx_hash(dev, skb);
+
+		if (queue_index != new_index && sk) {
+			struct dst_entry *dst =
+				    rcu_dereference_check(sk->sk_dst_cache, 1);
+
+			if (dst && skb_dst(skb) == dst)
+				sk_tx_queue_set(sk, queue_index);
+
+		}
+
+		queue_index = new_index;
+	}
+
+	return queue_index;
+}
+EXPORT_SYMBOL(__netdev_pick_tx);
+
 struct netdev_queue *netdev_pick_tx(struct net_device *dev,
 				    struct sk_buff *skb)
 {
-	int queue_index;
-	const struct net_device_ops *ops = dev->netdev_ops;
+	int queue_index = 0;
 
-	if (dev->real_num_tx_queues == 1)
-		queue_index = 0;
-	else if (ops->ndo_select_queue) {
-		queue_index = ops->ndo_select_queue(dev, skb);
+	if (dev->real_num_tx_queues != 1) {
+		const struct net_device_ops *ops = dev->netdev_ops;
+		if (ops->ndo_select_queue)
+			queue_index = ops->ndo_select_queue(dev, skb);
+		else
+			queue_index = __netdev_pick_tx(dev, skb);
 		queue_index = dev_cap_txqueue(dev, queue_index);
-	} else {
-		struct sock *sk = skb->sk;
-		queue_index = sk_tx_queue_get(sk);
-
-		if (queue_index < 0 || skb->ooo_okay ||
-		    queue_index >= dev->real_num_tx_queues) {
-			int old_index = queue_index;
-
-			queue_index = get_xps_queue(dev, skb);
-			if (queue_index < 0)
-				queue_index = skb_tx_hash(dev, skb);
-
-			if (queue_index != old_index && sk) {
-				struct dst_entry *dst =
-				    rcu_dereference_check(sk->sk_dst_cache, 1);
-
-				if (dst && skb_dst(skb) == dst)
-					sk_tx_queue_set(sk, queue_index);
-			}
-		}
 	}
 
 	skb_set_queue_mapping(skb, queue_index);
 	return netdev_get_tx_queue(dev, queue_index);
+}
+
+static void qdisc_pkt_len_init(struct sk_buff *skb)
+{
+	const struct skb_shared_info *shinfo = skb_shinfo(skb);
+
+	qdisc_skb_cb(skb)->pkt_len = skb->len;
+
+	/* To get more precise estimation of bytes sent on wire,
+	 * we add to pkt_len the headers size of all segments
+	 */
+	if (shinfo->gso_size)  {
+		unsigned int hdr_len = skb_transport_offset(skb);
+
+		if (likely(shinfo->gso_type & (SKB_GSO_TCPV4 | SKB_GSO_TCPV6)))
+			hdr_len += tcp_hdrlen(skb);
+		else
+			hdr_len += sizeof(struct udphdr);
+		qdisc_skb_cb(skb)->pkt_len += (shinfo->gso_segs - 1) * hdr_len;
+	}
 }
 
 static inline int __dev_xmit_skb(struct sk_buff *skb, struct Qdisc *q,
@@ -2540,7 +2794,7 @@ static inline int __dev_xmit_skb(struct sk_buff *skb, struct Qdisc *q,
 	bool contended;
 	int rc;
 
-	qdisc_skb_cb(skb)->pkt_len = skb->len;
+	qdisc_pkt_len_init(skb);
 	qdisc_calculate_pkt_len(skb, q);
 	/*
 	 * Heuristic to force contended enqueues to serialize on a
@@ -3352,7 +3606,8 @@ static int __netif_receive_skb(struct sk_buff *skb)
 	orig_dev = skb->dev;
 
 	skb_reset_network_header(skb);
-	skb_reset_transport_header(skb);
+	if (!skb_transport_header_was_set(skb))
+		skb_reset_transport_header(skb);
 	skb_reset_mac_len(skb);
 
 	pt_prev = NULL;
@@ -5675,6 +5930,10 @@ static void rollback_registered_many(struct list_head *head)
 
 		/* Remove entries from kobject tree */
 		netdev_unregister_kobject(dev);
+#ifdef CONFIG_XPS
+		/* Remove XPS queueing entries */
+		netif_reset_xps_queues_gt(dev, 0);
+#endif
 	}
 
 	synchronize_net();
@@ -6002,6 +6261,13 @@ int register_netdevice(struct net_device *dev)
 	dev_hold(dev);
 	list_netdevice(dev);
 	add_device_randomness(dev->dev_addr, dev->addr_len);
+
+	/* If the device has permanent device address, driver should
+	 * set dev_addr and also addr_assign_type should be set to
+	 * NET_ADDR_PERM (default value).
+	 */
+	if (dev->addr_assign_type == NET_ADDR_PERM)
+		memcpy(dev->perm_addr, dev->dev_addr, dev->addr_len);
 
 	/* Notify protocols, that a new device appeared. */
 	ret = call_netdevice_notifiers(NETDEV_REGISTER, dev);

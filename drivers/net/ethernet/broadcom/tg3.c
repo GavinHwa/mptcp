@@ -13726,8 +13726,10 @@ static void tg3_get_5720_nvram_info(struct tg3 *tp)
 		switch (nvmpinstrp) {
 		case FLASH_5762_EEPROM_HD:
 			nvmpinstrp = FLASH_5720_EEPROM_HD;
+			break;
 		case FLASH_5762_EEPROM_LD:
 			nvmpinstrp = FLASH_5720_EEPROM_LD;
+			break;
 		}
 	}
 
@@ -15772,7 +15774,6 @@ static int tg3_get_macaddr_sparc(struct tg3 *tp)
 	addr = of_get_property(dp, "local-mac-address", &len);
 	if (addr && len == 6) {
 		memcpy(dev->dev_addr, addr, 6);
-		memcpy(dev->perm_addr, dev->dev_addr, 6);
 		return 0;
 	}
 	return -ENODEV;
@@ -15783,7 +15784,6 @@ static int tg3_get_default_macaddr_sparc(struct tg3 *tp)
 	struct net_device *dev = tp->dev;
 
 	memcpy(dev->dev_addr, idprom->id_ethaddr, 6);
-	memcpy(dev->perm_addr, idprom->id_ethaddr, 6);
 	return 0;
 }
 #endif
@@ -15860,7 +15860,6 @@ static int tg3_get_device_address(struct tg3 *tp)
 #endif
 		return -EINVAL;
 	}
-	memcpy(dev->perm_addr, dev->dev_addr, dev->addr_len);
 	return 0;
 }
 

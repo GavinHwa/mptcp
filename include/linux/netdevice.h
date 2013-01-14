@@ -1403,6 +1403,7 @@ static inline void netdev_for_each_tx_queue(struct net_device *dev,
 
 extern struct netdev_queue *netdev_pick_tx(struct net_device *dev,
 					   struct sk_buff *skb);
+extern u16 __netdev_pick_tx(struct net_device *dev, struct sk_buff *skb);
 
 /*
  * Net namespace inlines
@@ -2101,6 +2102,18 @@ static inline void netif_wake_subqueue(struct net_device *dev, u16 queue_index)
 	if (test_and_clear_bit(__QUEUE_STATE_DRV_XOFF, &txq->state))
 		__netif_schedule(txq->qdisc);
 }
+
+#ifdef CONFIG_XPS
+extern int netif_set_xps_queue(struct net_device *dev, struct cpumask *mask,
+			       u16 index);
+#else
+static inline int netif_set_xps_queue(struct net_device *dev,
+				      struct cpumask *mask,
+				      u16 index)
+{
+	return 0;
+}
+#endif
 
 /*
  * Returns a Tx hash for the given packet when dev->real_num_tx_queues is used
