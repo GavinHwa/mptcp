@@ -32,7 +32,8 @@ static const char qlcnic_driver_string[] = "QLogic 1/10 GbE "
 
 static int qlcnic_mac_learn;
 module_param(qlcnic_mac_learn, int, 0444);
-MODULE_PARM_DESC(qlcnic_mac_learn, "Mac Filter (0=disabled, 1=enabled)");
+MODULE_PARM_DESC(qlcnic_mac_learn,
+		 "Mac Filter (0=learning is disabled, 1=Driver learning is enabled, 2=FDB learning is enabled)");
 
 int qlcnic_use_msi = 1;
 MODULE_PARM_DESC(use_msi, "MSI interrupt (0=disabled, 1=enabled");
@@ -246,6 +247,77 @@ static int qlcnic_set_mac(struct net_device *netdev, void *p)
 	return 0;
 }
 
+static int qlcnic_fdb_del(struct ndmsg *ndm, struct net_device *netdev,
+			const unsigned char *addr)
+{
+	struct qlcnic_adapter *adapter = netdev_priv(netdev);
+	int err = -EOPNOTSUPP;
+
+	if (!adapter->fdb_mac_learn) {
+		pr_info("%s: Driver mac learn is enabled, FDB operation not allowed\n",
+			__func__);
+		return err;
+	}
+
+	if (adapter->flags & QLCNIC_ESWITCH_ENABLED) {
+		if (is_unicast_ether_addr(addr))
+			err = qlcnic_nic_del_mac(adapter, addr);
+		else if (is_multicast_ether_addr(addr))
+			err = dev_mc_del(netdev, addr);
+		else
+			err =  -EINVAL;
+	}
+	return err;
+}
+
+static int qlcnic_fdb_add(struct ndmsg *ndm, struct nlattr *tb[],
+			struct net_device *netdev,
+			const unsigned char *addr, u16 flags)
+{
+	struct qlcnic_adapter *adapter = netdev_priv(netdev);
+	int err = 0;
+
+	if (!adapter->fdb_mac_learn) {
+		pr_info("%s: Driver mac learn is enabled, FDB operation not allowed\n",
+			__func__);
+		return -EOPNOTSUPP;
+	}
+
+	if (!(adapter->flags & QLCNIC_ESWITCH_ENABLED)) {
+		pr_info("%s: FDB e-switch is not enabled\n", __func__);
+		return -EOPNOTSUPP;
+	}
+
+	if (ether_addr_equal(addr, adapter->mac_addr))
+		return err;
+
+	if (is_unicast_ether_addr(addr))
+		err = qlcnic_nic_add_mac(adapter, addr);
+	else if (is_multicast_ether_addr(addr))
+		err = dev_mc_add_excl(netdev, addr);
+	else
+		err = -EINVAL;
+
+	return err;
+}
+
+static int qlcnic_fdb_dump(struct sk_buff *skb, struct netlink_callback *ncb,
+			struct net_device *netdev, int idx)
+{
+	struct qlcnic_adapter *adapter = netdev_priv(netdev);
+
+	if (!adapter->fdb_mac_learn) {
+		pr_info("%s: Driver mac learn is enabled, FDB operation not allowed\n",
+			__func__);
+		return -EOPNOTSUPP;
+	}
+
+	if (adapter->flags & QLCNIC_ESWITCH_ENABLED)
+		idx = ndo_dflt_fdb_dump(skb, ncb, netdev, idx);
+
+	return idx;
+}
+
 static void qlcnic_82xx_cancel_idc_work(struct qlcnic_adapter *adapter)
 {
 	while (test_and_set_bit(__QLCNIC_RESETTING, &adapter->state))
@@ -268,6 +340,9 @@ static const struct net_device_ops qlcnic_netdev_ops = {
 	.ndo_tx_timeout	   = qlcnic_tx_timeout,
 	.ndo_vlan_rx_add_vid	= qlcnic_vlan_rx_add,
 	.ndo_vlan_rx_kill_vid	= qlcnic_vlan_rx_del,
+	.ndo_fdb_add		= qlcnic_fdb_add,
+	.ndo_fdb_del		= qlcnic_fdb_del,
+	.ndo_fdb_dump		= qlcnic_fdb_dump,
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller = qlcnic_poll_controller,
 #endif
@@ -395,8 +470,9 @@ int qlcnic_enable_msix(struct qlcnic_adapter *adapter, u32 num_msix)
 	return err;
 }
 
-static void qlcnic_enable_msi_legacy(struct qlcnic_adapter *adapter)
+static int qlcnic_enable_msi_legacy(struct qlcnic_adapter *adapter)
 {
+	int err = 0;
 	u32 offset, mask_reg;
 	const struct qlcnic_legacy_intr_set *legacy_intrp;
 	struct qlcnic_hardware_context *ahw = adapter->ahw;
@@ -409,8 +485,10 @@ static void qlcnic_enable_msi_legacy(struct qlcnic_adapter *adapter)
 							    offset);
 		dev_info(&pdev->dev, "using msi interrupts\n");
 		adapter->msix_entries[0].vector = pdev->irq;
-		return;
+		return err;
 	}
+	if (qlcnic_use_msi || qlcnic_use_msi_x)
+		return -EOPNOTSUPP;
 
 	legacy_intrp = &legacy_intr[adapter->ahw->pci_func];
 	adapter->ahw->int_vec_bit = legacy_intrp->int_vec_bit;
@@ -422,11 +500,12 @@ static void qlcnic_enable_msi_legacy(struct qlcnic_adapter *adapter)
 	adapter->crb_int_state_reg = qlcnic_get_ioaddr(ahw, ISR_INT_STATE_REG);
 	dev_info(&pdev->dev, "using legacy interrupts\n");
 	adapter->msix_entries[0].vector = pdev->irq;
+	return err;
 }
 
 int qlcnic_82xx_setup_intr(struct qlcnic_adapter *adapter, u8 num_intr)
 {
-	int num_msix, err;
+	int num_msix, err = 0;
 
 	if (!num_intr)
 		num_intr = QLCNIC_DEF_NUM_STS_DESC_RINGS;
@@ -441,8 +520,11 @@ int qlcnic_82xx_setup_intr(struct qlcnic_adapter *adapter, u8 num_intr)
 	if (err == -ENOMEM || !err)
 		return err;
 
-	qlcnic_enable_msi_legacy(adapter);
-	return 0;
+	err = qlcnic_enable_msi_legacy(adapter);
+	if (!err)
+		return err;
+
+	return -EIO;
 }
 
 void qlcnic_teardown_intr(struct qlcnic_adapter *adapter)
@@ -781,6 +863,12 @@ qlcnic_initialize_nic(struct qlcnic_adapter *adapter)
 	adapter->ahw->max_tx_ques = nic_info.max_tx_ques;
 	adapter->ahw->max_rx_ques = nic_info.max_rx_ques;
 	adapter->ahw->capabilities = nic_info.capabilities;
+
+	if (adapter->ahw->capabilities & QLCNIC_FW_CAPABILITY_MORE_CAPS) {
+		u32 temp;
+		temp = QLCRD32(adapter, CRB_FW_CAPABILITIES_2);
+		adapter->ahw->capabilities2 = temp;
+	}
 	adapter->ahw->max_mac_filters = nic_info.max_mac_filters;
 	adapter->ahw->max_mtu = nic_info.max_mtu;
 
@@ -1717,13 +1805,14 @@ int qlcnic_alloc_tx_rings(struct qlcnic_adapter *adapter,
 	return 0;
 }
 
-static int __devinit
+static int
 qlcnic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct net_device *netdev = NULL;
 	struct qlcnic_adapter *adapter = NULL;
 	struct qlcnic_hardware_context *ahw;
 	int err, pci_using_dac = -1;
+	u32 capab2;
 	char board_name[QLCNIC_MAX_BOARD_NAME_LEN];
 
 	err = pci_enable_device(pdev);
@@ -1788,7 +1877,10 @@ qlcnic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	adapter->dev_rst_time = jiffies;
 	adapter->ahw->revision_id = pdev->revision;
-	adapter->mac_learn = qlcnic_mac_learn;
+	if (qlcnic_mac_learn == FDB_MAC_LEARN)
+		adapter->fdb_mac_learn = true;
+	else if (qlcnic_mac_learn == DRV_MAC_LEARN)
+		adapter->drv_mac_learn = true;
 	adapter->max_drv_tx_rings = 1;
 
 	rwlock_init(&adapter->ahw->crb_lock);
@@ -1836,8 +1928,10 @@ qlcnic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			board_name, adapter->ahw->revision_id);
 	}
 	err = qlcnic_setup_intr(adapter, 0);
-	if (err)
+	if (err) {
+		dev_err(&pdev->dev, "Failed to setup interrupt\n");
 		goto err_out_disable_msi;
+	}
 
 	if (qlcnic_83xx_check(adapter)) {
 		err = qlcnic_83xx_setup_mbx_intr(adapter);
@@ -1848,6 +1942,14 @@ qlcnic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	err = qlcnic_setup_netdev(adapter, netdev, pci_using_dac);
 	if (err)
 		goto err_out_disable_mbx_intr;
+
+	if (qlcnic_82xx_check(adapter)) {
+		if (ahw->capabilities & QLCNIC_FW_CAPABILITY_MORE_CAPS) {
+			capab2 = QLCRD32(adapter, CRB_FW_CAPABILITIES_2);
+			if (capab2 & QLCNIC_FW_CAPABILITY_2_OCBB)
+				qlcnic_fw_cmd_set_drv_version(adapter);
+		}
+	}
 
 	pci_set_drvdata(pdev, adapter);
 
@@ -1869,7 +1971,7 @@ qlcnic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (qlcnic_get_act_pci_func(adapter))
 		goto err_out_disable_mbx_intr;
 
-	if (adapter->mac_learn)
+	if (adapter->drv_mac_learn)
 		qlcnic_alloc_lb_filters_mem(adapter);
 
 	qlcnic_add_sysfs(adapter);
@@ -1909,7 +2011,7 @@ err_out_disable_pdev:
 	return err;
 }
 
-static void __devexit qlcnic_remove(struct pci_dev *pdev)
+static void qlcnic_remove(struct pci_dev *pdev)
 {
 	struct qlcnic_adapter *adapter;
 	struct net_device *netdev;
@@ -2118,7 +2220,7 @@ void qlcnic_alloc_lb_filters_mem(struct qlcnic_adapter *adapter)
 	}
 
 	head = kcalloc(adapter->fhash.fbucket_size,
-		       sizeof(struct hlist_head), GFP_KERNEL);
+		       sizeof(struct hlist_head), GFP_ATOMIC);
 
 	if (!head)
 		return;
@@ -2961,6 +3063,12 @@ static int qlcnic_attach_func(struct pci_dev *pdev)
 	adapter->msix_entries = NULL;
 	err = qlcnic_setup_intr(adapter, 0);
 
+	if (err) {
+		kfree(adapter->msix_entries);
+		netdev_err(netdev, "failed to setup interrupt\n");
+		return err;
+	}
+
 	if (qlcnic_83xx_check(adapter)) {
 		err = qlcnic_83xx_setup_mbx_intr(adapter);
 		if (err) {
@@ -3116,9 +3224,11 @@ int qlcnic_set_max_rss(struct qlcnic_adapter *adapter, u8 data, size_t len)
 	qlcnic_detach(adapter);
 	qlcnic_teardown_intr(adapter);
 	err = qlcnic_setup_intr(adapter, data);
-	if (err)
-		dev_err(&adapter->pdev->dev,
-			"failed setting max_rss; rss disabled\n");
+	if (err) {
+		kfree(adapter->msix_entries);
+		netdev_err(netdev, "failed to setup interrupt\n");
+		return err;
+	}
 
 	if (qlcnic_83xx_check(adapter)) {
 		err = qlcnic_83xx_setup_mbx_intr(adapter);

@@ -37,9 +37,9 @@
 #include "qlcnic_83xx_hw.h"
 
 #define _QLCNIC_LINUX_MAJOR 5
-#define _QLCNIC_LINUX_MINOR 0
-#define _QLCNIC_LINUX_SUBVERSION 31
-#define QLCNIC_LINUX_VERSIONID  "5.1.31"
+#define _QLCNIC_LINUX_MINOR 1
+#define _QLCNIC_LINUX_SUBVERSION 32
+#define QLCNIC_LINUX_VERSIONID  "5.1.32"
 #define QLCNIC_DRV_IDC_VER  0x01
 #define QLCNIC_DRIVER_VERSION  ((_QLCNIC_LINUX_MAJOR << 16) |\
 		 (_QLCNIC_LINUX_MINOR << 8) | (_QLCNIC_LINUX_SUBVERSION))
@@ -436,6 +436,7 @@ struct qlcnic_hardware_context {
 	u16 act_pci_func;
 
 	u32 capabilities;
+	u32 capabilities2;
 	u32 temp;
 	u32 int_vec_bit;
 	u32 fw_hal_version;
@@ -745,6 +746,11 @@ struct qlcnic_mac_list_s {
 	uint8_t mac_addr[ETH_ALEN+2];
 };
 
+/* MAC Learn */
+#define NO_MAC_LEARN		0
+#define DRV_MAC_LEARN		1
+#define FDB_MAC_LEARN		2
+
 #define QLCNIC_HOST_REQUEST	0x13
 #define QLCNIC_REQUEST		0x14
 
@@ -798,6 +804,8 @@ struct qlcnic_mac_list_s {
 #define QLCNIC_FW_CAPABILITY_MORE_CAPS		BIT_31
 
 #define QLCNIC_FW_CAPABILITY_2_LRO_MAX_TCP_SEG	BIT_2
+#define QLCNIC_FW_CAP2_HW_LRO_IPV6		BIT_3
+#define QLCNIC_FW_CAPABILITY_2_OCBB		BIT_5
 
 /* module types */
 #define LINKEVENT_MODULE_NOT_PRESENT			1
@@ -978,7 +986,8 @@ struct qlcnic_adapter {
 	u8 mac_addr[ETH_ALEN];
 
 	u64 dev_rst_time;
-	u8 mac_learn;
+	bool drv_mac_learn;
+	bool fdb_mac_learn;
 	unsigned long vlans[BITS_TO_LONGS(VLAN_N_VID)];
 	u8 flash_mfg_id;
 	struct qlcnic_npar_info *npars;
@@ -1418,9 +1427,12 @@ void qlcnic_post_rx_buffers(struct qlcnic_adapter *adapter,
 		struct qlcnic_host_rds_ring *rds_ring, u8 ring_id);
 int qlcnic_process_rcv_ring(struct qlcnic_host_sds_ring *sds_ring, int max);
 void qlcnic_set_multi(struct net_device *netdev);
+int qlcnic_nic_add_mac(struct qlcnic_adapter *, const u8 *);
+int qlcnic_nic_del_mac(struct qlcnic_adapter *, const u8 *);
 void qlcnic_free_mac_list(struct qlcnic_adapter *adapter);
 
 int qlcnic_fw_cmd_set_mtu(struct qlcnic_adapter *adapter, int mtu);
+int qlcnic_fw_cmd_set_drv_version(struct qlcnic_adapter *);
 int qlcnic_change_mtu(struct net_device *netdev, int new_mtu);
 netdev_features_t qlcnic_fix_features(struct net_device *netdev,
 	netdev_features_t features);

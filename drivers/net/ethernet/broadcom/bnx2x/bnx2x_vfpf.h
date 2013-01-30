@@ -1,6 +1,6 @@
 /* bnx2x_vfpf.h: Broadcom Everest network driver.
  *
- * Copyright (c) 2011-2012 Broadcom Corporation
+ * Copyright (c) 2011-2013 Broadcom Corporation
  *
  * Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -318,7 +318,8 @@ struct pf_vf_bulletin_content {
 	u32 crc;			/* crc of structure to ensure is not in
 					 * mid-update
 					 */
-	u32 version;
+	u16 version;
+	u16 length;
 
 	aligned_u64 valid_bitmap;	/* bitmap indicating which fields
 					 * hold valid values

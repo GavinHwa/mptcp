@@ -1235,13 +1235,13 @@ static bool tcp_shifted_skb(struct sock *sk, struct sk_buff *skb,
 	 */
 	if (!skb_shinfo(prev)->gso_size) {
 		skb_shinfo(prev)->gso_size = mss;
-		skb_shinfo(prev)->gso_type = sk->sk_gso_type;
+		skb_shinfo(prev)->gso_type |= sk->sk_gso_type;
 	}
 
 	/* CHECKME: To clear or not to clear? Mimics normal skb currently */
 	if (skb_shinfo(skb)->gso_segs <= 1) {
 		skb_shinfo(skb)->gso_size = 0;
-		skb_shinfo(skb)->gso_type = 0;
+		skb_shinfo(skb)->gso_type &= SKB_GSO_SHARED_FRAG;
 	}
 
 	/* Difference in this won't matter, both ACKed by the same cumul. ACK */
@@ -5670,7 +5670,7 @@ slow_path:
 	if (len < (th->doff << 2) || tcp_checksum_complete_user(sk, skb))
 		goto csum_error;
 
-	if (!th->ack)
+	if (!th->ack && !th->rst)
 		goto discard;
 
 	/*
@@ -6202,7 +6202,7 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
 			goto discard;
 	}
 
-	if (!th->ack)
+	if (!th->ack && !th->rst)
 		goto discard;
 
 	if (!tcp_validate_incoming(sk, skb, th, 0))

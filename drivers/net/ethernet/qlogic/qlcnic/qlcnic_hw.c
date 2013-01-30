@@ -446,7 +446,29 @@ int qlcnic_82xx_sre_macaddr_change(struct qlcnic_adapter *adapter, u8 *addr,
 	return qlcnic_send_cmd_descs(adapter, (struct cmd_desc_type0 *)&req, 1);
 }
 
-static int qlcnic_nic_add_mac(struct qlcnic_adapter *adapter, const u8 *addr)
+int qlcnic_nic_del_mac(struct qlcnic_adapter *adapter, const u8 *addr)
+{
+	struct list_head *head;
+	struct qlcnic_mac_list_s *cur;
+	int err = -EINVAL;
+
+	/* Delete MAC from the existing list */
+	list_for_each(head, &adapter->mac_list) {
+		cur = list_entry(head, struct qlcnic_mac_list_s, list);
+		if (memcmp(addr, cur->mac_addr, ETH_ALEN) == 0) {
+			err = qlcnic_sre_macaddr_change(adapter, cur->mac_addr,
+							0, QLCNIC_MAC_DEL);
+			if (err)
+				return err;
+			list_del(&cur->list);
+			kfree(cur);
+			return err;
+		}
+	}
+	return err;
+}
+
+int qlcnic_nic_add_mac(struct qlcnic_adapter *adapter, const u8 *addr)
 {
 	struct list_head *head;
 	struct qlcnic_mac_list_s *cur;
@@ -510,11 +532,11 @@ void qlcnic_set_multi(struct net_device *netdev)
 	}
 
 send_fw_cmd:
-	if (mode == VPORT_MISS_MODE_ACCEPT_ALL) {
+	if (mode == VPORT_MISS_MODE_ACCEPT_ALL && !adapter->fdb_mac_learn) {
 		qlcnic_alloc_lb_filters_mem(adapter);
-		adapter->mac_learn = 1;
+		adapter->drv_mac_learn = true;
 	} else {
-		adapter->mac_learn = 0;
+		adapter->drv_mac_learn = false;
 	}
 
 	qlcnic_nic_set_promisc(adapter, mode);
@@ -687,6 +709,11 @@ void qlcnic_82xx_config_intr_coalesce(struct qlcnic_adapter *adapter)
 			"Could not send interrupt coalescing parameters\n");
 }
 
+#define QLCNIC_ENABLE_IPV4_LRO		1
+#define QLCNIC_ENABLE_IPV6_LRO		2
+#define QLCNIC_NO_DEST_IPV4_CHECK	(1 << 8)
+#define QLCNIC_NO_DEST_IPV6_CHECK	(2 << 8)
+
 int qlcnic_82xx_config_hw_lro(struct qlcnic_adapter *adapter, int enable)
 {
 	struct qlcnic_nic_req req;
@@ -703,7 +730,15 @@ int qlcnic_82xx_config_hw_lro(struct qlcnic_adapter *adapter, int enable)
 	word = QLCNIC_H2C_OPCODE_CONFIG_HW_LRO | ((u64)adapter->portnum << 16);
 	req.req_hdr = cpu_to_le64(word);
 
-	req.words[0] = cpu_to_le64(enable);
+	word = 0;
+	if (enable) {
+		word = QLCNIC_ENABLE_IPV4_LRO | QLCNIC_NO_DEST_IPV4_CHECK;
+		if (adapter->ahw->capabilities2 & QLCNIC_FW_CAP2_HW_LRO_IPV6)
+			word |= QLCNIC_ENABLE_IPV6_LRO |
+				QLCNIC_NO_DEST_IPV6_CHECK;
+	}
+
+	req.words[0] = cpu_to_le64(word);
 
 	rv = qlcnic_send_cmd_descs(adapter, (struct cmd_desc_type0 *)&req, 1);
 	if (rv != 0)
@@ -743,7 +778,10 @@ int qlcnic_config_bridged_mode(struct qlcnic_adapter *adapter, u32 enable)
 }
 
 
-#define RSS_HASHTYPE_IP_TCP	0x3
+#define QLCNIC_RSS_HASHTYPE_IP_TCP	0x3
+#define QLCNIC_ENABLE_TYPE_C_RSS	BIT_10
+#define QLCNIC_RSS_FEATURE_FLAG	(1ULL << 63)
+#define QLCNIC_RSS_IND_TABLE_MASK	0x7ULL
 
 int qlcnic_82xx_config_rss(struct qlcnic_adapter *adapter, int enable)
 {
@@ -770,13 +808,19 @@ int qlcnic_82xx_config_rss(struct qlcnic_adapter *adapter, int enable)
 	 *	7-6: hash_type_ipv6
 	 *	  8: enable
 	 *        9: use indirection table
-	 *    47-10: reserved
-	 *    63-48: indirection table mask
+	 *       10: type-c rss
+	 *	 11: udp rss
+	 *    47-12: reserved
+	 *    62-48: indirection table mask
+	 *	 63: feature flag
 	 */
-	word =  ((u64)(RSS_HASHTYPE_IP_TCP & 0x3) << 4) |
-		((u64)(RSS_HASHTYPE_IP_TCP & 0x3) << 6) |
+	word =  ((u64)(QLCNIC_RSS_HASHTYPE_IP_TCP & 0x3) << 4) |
+		((u64)(QLCNIC_RSS_HASHTYPE_IP_TCP & 0x3) << 6) |
 		((u64)(enable & 0x1) << 8) |
-		((0x7ULL) << 48);
+		((u64)QLCNIC_RSS_IND_TABLE_MASK << 48) |
+		(u64)QLCNIC_ENABLE_TYPE_C_RSS |
+		(u64)QLCNIC_RSS_FEATURE_FLAG;
+
 	req.words[0] = cpu_to_le64(word);
 	for (i = 0; i < 5; i++)
 		req.words[i+1] = cpu_to_le64(key[i]);
@@ -1358,7 +1402,7 @@ int qlcnic_82xx_config_led(struct qlcnic_adapter *adapter, u32 state, u32 rate)
 	word = QLCNIC_H2C_OPCODE_CONFIG_LED | ((u64)adapter->portnum << 16);
 	req.req_hdr = cpu_to_le64(word);
 
-	req.words[0] = cpu_to_le64((u64)rate << 32);
+	req.words[0] = cpu_to_le64(((u64)rate << 32) | adapter->portnum);
 	req.words[1] = cpu_to_le64(state);
 
 	rv = qlcnic_send_cmd_descs(adapter, (struct cmd_desc_type0 *)&req, 1);

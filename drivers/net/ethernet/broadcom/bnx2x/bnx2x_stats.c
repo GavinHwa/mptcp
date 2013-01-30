@@ -1,6 +1,6 @@
 /* bnx2x_stats.c: Broadcom Everest network driver.
  *
- * Copyright (c) 2007-2012 Broadcom Corporation
+ * Copyright (c) 2007-2013 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -212,7 +212,7 @@ static int bnx2x_stats_comp(struct bnx2x *bp)
 			break;
 		}
 		cnt--;
-		usleep_range(1000, 1000);
+		usleep_range(1000, 2000);
 	}
 	return 1;
 }
@@ -1010,8 +1010,8 @@ static int bnx2x_storm_stats_update(struct bnx2x *bp)
 		UPDATE_EXTEND_TSTAT(rcv_bcast_pkts,
 					total_broadcast_packets_received);
 		UPDATE_EXTEND_E_TSTAT(pkts_too_big_discard,
-				      etherstatsoverrsizepkts);
-		UPDATE_EXTEND_E_TSTAT(no_buff_discard, no_buff_discard);
+				      etherstatsoverrsizepkts, 32);
+		UPDATE_EXTEND_E_TSTAT(no_buff_discard, no_buff_discard, 16);
 
 		SUB_EXTEND_USTAT(ucast_no_buff_pkts,
 					total_unicast_packets_received);
@@ -1090,15 +1090,15 @@ static int bnx2x_storm_stats_update(struct bnx2x *bp)
 	       estats->total_bytes_received_lo,
 	       estats->rx_stat_ifhcinbadoctets_lo);
 
-	ADD_64(estats->total_bytes_received_hi,
-	       le32_to_cpu(tfunc->rcv_error_bytes.hi),
-	       estats->total_bytes_received_lo,
-	       le32_to_cpu(tfunc->rcv_error_bytes.lo));
+	ADD_64_LE(estats->total_bytes_received_hi,
+		  tfunc->rcv_error_bytes.hi,
+		  estats->total_bytes_received_lo,
+		  tfunc->rcv_error_bytes.lo);
 
-	ADD_64(estats->error_bytes_received_hi,
-	       le32_to_cpu(tfunc->rcv_error_bytes.hi),
-	       estats->error_bytes_received_lo,
-	       le32_to_cpu(tfunc->rcv_error_bytes.lo));
+	ADD_64_LE(estats->error_bytes_received_hi,
+		  tfunc->rcv_error_bytes.hi,
+		  estats->error_bytes_received_lo,
+		  tfunc->rcv_error_bytes.lo);
 
 	UPDATE_ESTAT(etherstatsoverrsizepkts, rx_stat_dot3statsframestoolong);
 

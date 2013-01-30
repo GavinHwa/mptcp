@@ -1,6 +1,6 @@
 /* bnx2x.h: Broadcom Everest network driver.
  *
- * Copyright (c) 2007-2012 Broadcom Corporation
+ * Copyright (c) 2007-2013 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,8 +26,8 @@
  * (you will need to reboot afterwards) */
 /* #define BNX2X_STOP_ON_ERROR */
 
-#define DRV_MODULE_VERSION      "1.78.01-0"
-#define DRV_MODULE_RELDATE      "2012/10/30"
+#define DRV_MODULE_VERSION      "1.78.02-0"
+#define DRV_MODULE_RELDATE      "2013/01/14"
 #define BNX2X_BC_VER            0x040200
 
 #if defined(CONFIG_DCB)
@@ -122,29 +122,29 @@ do {								 \
 		dev_info(&bp->pdev->dev, fmt, ##__VA_ARGS__);	 \
 } while (0)
 
+/* Error handling */
+void bnx2x_panic_dump(struct bnx2x *bp, bool disable_int);
 #ifdef BNX2X_STOP_ON_ERROR
-void bnx2x_int_disable(struct bnx2x *bp);
 #define bnx2x_panic()				\
 do {						\
 	bp->panic = 1;				\
 	BNX2X_ERR("driver assert\n");		\
-	bnx2x_int_disable(bp);			\
-	bnx2x_panic_dump(bp);			\
+	bnx2x_panic_dump(bp, true);		\
 } while (0)
 #else
 #define bnx2x_panic()				\
 do {						\
 	bp->panic = 1;				\
 	BNX2X_ERR("driver assert\n");		\
-	bnx2x_panic_dump(bp);			\
+	bnx2x_panic_dump(bp, false);		\
 } while (0)
 #endif
 
 #define bnx2x_mc_addr(ha)      ((ha)->addr)
 #define bnx2x_uc_addr(ha)      ((ha)->addr)
 
-#define U64_LO(x)			(u32)(((u64)(x)) & 0xffffffff)
-#define U64_HI(x)			(u32)(((u64)(x)) >> 32)
+#define U64_LO(x)			((u32)(((u64)(x)) & 0xffffffff))
+#define U64_HI(x)			((u32)(((u64)(x)) >> 32))
 #define HILO_U64(hi, lo)		((((u64)(hi)) << 32) + (lo))
 
 
@@ -814,7 +814,7 @@ struct bnx2x_common {
 #define CHIP_NUM_57811			0x163d
 #define CHIP_NUM_57811_MF		0x163e
 #define CHIP_NUM_57811_VF		0x163f
-#define CHIP_NUM_57840_OBSOLETE	0x168d
+#define CHIP_NUM_57840_OBSOLETE		0x168d
 #define CHIP_NUM_57840_MF_OBSOLETE	0x16ab
 #define CHIP_NUM_57840_4_10		0x16a1
 #define CHIP_NUM_57840_2_20		0x16a2
@@ -845,9 +845,11 @@ struct bnx2x_common {
 #define CHIP_IS_E1H(bp)			(CHIP_IS_57711(bp) || \
 					 CHIP_IS_57711E(bp))
 #define CHIP_IS_E2(bp)			(CHIP_IS_57712(bp) || \
-					 CHIP_IS_57712_MF(bp))
+					 CHIP_IS_57712_MF(bp) || \
+					 CHIP_IS_57712_VF(bp))
 #define CHIP_IS_E3(bp)			(CHIP_IS_57800(bp) || \
 					 CHIP_IS_57800_MF(bp) || \
+					 CHIP_IS_57800_VF(bp) || \
 					 CHIP_IS_57810(bp) || \
 					 CHIP_IS_57810_MF(bp) || \
 					 CHIP_IS_57810_VF(bp) || \
@@ -1197,11 +1199,11 @@ struct bnx2x_fw_stats_req {
 };
 
 struct bnx2x_fw_stats_data {
-	struct stats_counter	storm_counters;
-	struct per_port_stats	port;
-	struct per_pf_stats	pf;
+	struct stats_counter		storm_counters;
+	struct per_port_stats		port;
+	struct per_pf_stats		pf;
 	struct fcoe_statistics_params	fcoe;
-	struct per_queue_stats  queue_stats[1];
+	struct per_queue_stats		queue_stats[1];
 };
 
 /* Public slow path states */
@@ -1344,8 +1346,6 @@ struct bnx2x {
 	u16			eq_cons;
 	__le16			*eq_cons_sb;
 	atomic_t		eq_spq_left; /* COMMON_XXX ramrods credit */
-
-
 
 	/* Counter for marking that there is a STAT_QUERY ramrod pending */
 	u16			stats_pending;
@@ -1704,6 +1704,9 @@ struct bnx2x {
 
 	/* priority to cos mapping */
 	u8					prio_to_cos[8];
+
+	int fp_array_size;
+	u32 dump_preset_idx;
 };
 
 /* Tx queues may be less or equal to Rx queues */
@@ -2077,9 +2080,7 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 #define BNX2X_LOOPBACK_FAILED		(BNX2X_MAC_LOOPBACK_FAILED | \
 					 BNX2X_PHY_LOOPBACK_FAILED)
 
-
 #define STROM_ASSERT_ARRAY_SIZE		50
-
 
 /* must be used on a CID before placing it on a HW ring */
 #define HW_CID(bp, x)			((BP_PORT(bp) << 23) | \
@@ -2110,7 +2111,6 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 #define T_FAIR_COEF	((MIN_ABOVE_THRESH +  QM_ARB_BYTES) * 8 * MIN_RES)
 /* Memory of fairness algorithm . 2 cycles */
 #define FAIR_MEM					2
-
 
 #define ATTN_NIG_FOR_FUNC		(1L << 8)
 #define ATTN_SW_TIMER_4_FUNC		(1L << 9)
@@ -2154,6 +2154,7 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 				(AEU_INPUTS_ATTN_BITS_TSDM_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_TCM_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_TSEMI_HW_INTERRUPT | \
+				 AEU_INPUTS_ATTN_BITS_BRB_HW_INTERRUPT | \
 				 AEU_INPUTS_ATTN_BITS_PBCLIENT_HW_INTERRUPT)
 #define HW_PRTY_ASSERT_SET_0	(AEU_INPUTS_ATTN_BITS_BRB_PARITY_ERROR | \
 				 AEU_INPUTS_ATTN_BITS_PARSER_PARITY_ERROR | \
@@ -2215,7 +2216,6 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 
 #define MULTI_MASK			0x7f
 
-
 #define DEF_USB_FUNC_OFF	offsetof(struct cstorm_def_status_block_u, func)
 #define DEF_CSB_FUNC_OFF	offsetof(struct cstorm_def_status_block_c, func)
 #define DEF_XSB_FUNC_OFF	offsetof(struct xstorm_def_status_block, func)
@@ -2243,18 +2243,6 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 		(&bp->def_status_blk->sp_sb.\
 					index_values[HC_SP_INDEX_ETH_DEF_CONS])
 
-#define SET_FLAG(value, mask, flag) \
-	do {\
-		(value) &= ~(mask);\
-		(value) |= ((flag) << (mask##_SHIFT));\
-	} while (0)
-
-#define GET_FLAG(value, mask) \
-	(((value) & (mask)) >> (mask##_SHIFT))
-
-#define GET_FIELD(value, fname) \
-	(((value) & (fname##_MASK)) >> (fname##_SHIFT))
-
 #define CAM_IS_INVALID(x) \
 	(GET_FLAG(x.flags, \
 	MAC_CONFIGURATION_ENTRY_ACTION_TYPE) == \
@@ -2264,7 +2252,6 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 #define MC_HASH_SIZE			8
 #define MC_HASH_OFFSET(bp, i)		(BAR_TSTRORM_INTMEM + \
 	TSTORM_APPROXIMATE_MATCH_MULTICAST_FILTERING_OFFSET(BP_FUNC(bp)) + i*4)
-
 
 #ifndef PXP2_REG_PXP2_INT_STS
 #define PXP2_REG_PXP2_INT_STS		PXP2_REG_PXP2_INT_STS_0
@@ -2285,8 +2272,8 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 			    (!((me_reg) & ME_REG_VF_ERR)))
 int bnx2x_nic_load_analyze_req(struct bnx2x *bp, u32 load_code);
 /* Congestion management fairness mode */
-#define CMNG_FNS_NONE		0
-#define CMNG_FNS_MINMAX		1
+#define CMNG_FNS_NONE			0
+#define CMNG_FNS_MINMAX			1
 
 #define HC_SEG_ACCESS_DEF		0   /*Driver decision 0-3*/
 #define HC_SEG_ACCESS_ATTN		4
@@ -2301,7 +2288,6 @@ static const u32 dmae_reg_go_c[] = {
 
 void bnx2x_set_ethtool_ops(struct net_device *netdev);
 void bnx2x_notify_link_changed(struct bnx2x *bp);
-
 
 #define BNX2X_MF_SD_PROTOCOL(bp) \
 	((bp)->mf_config[BP_VN(bp)] & FUNC_MF_CFG_PROTOCOL_MASK)
@@ -2322,6 +2308,18 @@ void bnx2x_notify_link_changed(struct bnx2x *bp);
 #define IS_MF_STORAGE_SD(bp) (IS_MF_SD(bp) && \
 				(BNX2X_IS_MF_SD_PROTOCOL_ISCSI(bp) || \
 				 BNX2X_IS_MF_SD_PROTOCOL_FCOE(bp)))
+
+#define SET_FLAG(value, mask, flag) \
+	do {\
+		(value) &= ~(mask);\
+		(value) |= ((flag) << (mask##_SHIFT));\
+	} while (0)
+
+#define GET_FLAG(value, mask) \
+	(((value) & (mask)) >> (mask##_SHIFT))
+
+#define GET_FIELD(value, fname) \
+	(((value) & (fname##_MASK)) >> (fname##_SHIFT))
 
 enum {
 	SWITCH_UPDATE,

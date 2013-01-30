@@ -1,6 +1,6 @@
 /* bnx2x_sriov.c: Broadcom Everest network driver.
  *
- * Copyright 2009-2012 Broadcom Corporation
+ * Copyright 2009-2013 Broadcom Corporation
  *
  * Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -3124,7 +3124,7 @@ u32 bnx2x_crc_vf_bulletin(struct bnx2x *bp,
 {
 	return crc32(BULLETIN_CRC_SEED,
 		 ((u8 *)bulletin) + sizeof(bulletin->crc),
-		 BULLETIN_CONTENT_SIZE - sizeof(bulletin->crc));
+		 bulletin->length - sizeof(bulletin->crc));
 }
 
 /* Check for new posts on the bulletin board */

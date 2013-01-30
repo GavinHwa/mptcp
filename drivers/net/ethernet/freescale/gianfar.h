@@ -935,26 +935,25 @@ struct tx_q_stats {
  *	@txtime: coalescing value if based on time
  */
 struct gfar_priv_tx_q {
+	/* cacheline 1 */
 	spinlock_t txlock __attribute__ ((aligned (SMP_CACHE_BYTES)));
-	struct sk_buff ** tx_skbuff;
-	/* Buffer descriptor pointers */
-	dma_addr_t tx_bd_dma_base;
 	struct	txbd8 *tx_bd_base;
 	struct	txbd8 *cur_tx;
-	struct	txbd8 *dirty_tx;
-	struct tx_q_stats stats;
-	struct	net_device *dev;
-	struct gfar_priv_grp *grp;
-	u16	skb_curtx;
-	u16	skb_dirtytx;
-	u16	qindex;
-	unsigned int tx_ring_size;
 	unsigned int num_txbdfree;
+	unsigned short skb_curtx;
+	unsigned short tx_ring_size;
+	struct tx_q_stats stats;
+	struct gfar_priv_grp *grp;
+	/* cacheline 2 */
+	struct net_device *dev;
+	struct sk_buff **tx_skbuff;
+	struct	txbd8 *dirty_tx;
+	unsigned short skb_dirtytx;
+	unsigned short qindex;
 	/* Configuration info for the coalescing features */
-	unsigned char txcoalescing;
+	unsigned int txcoalescing;
 	unsigned long txic;
-	unsigned short txcount;
-	unsigned short txtime;
+	dma_addr_t tx_bd_dma_base;
 };
 
 /*
@@ -997,18 +996,25 @@ struct gfar_priv_rx_q {
 	unsigned long rxic;
 };
 
+enum gfar_irqinfo_id {
+	GFAR_TX = 0,
+	GFAR_RX = 1,
+	GFAR_ER = 2,
+	GFAR_NUM_IRQS = 3
+};
+
+struct gfar_irqinfo {
+	unsigned int irq;
+	char name[GFAR_INT_NAME_MAX];
+};
+
 /**
  *	struct gfar_priv_grp - per group structure
  *	@napi: the napi poll function
  *	@priv: back pointer to the priv structure
  *	@regs: the ioremapped register space for this group
  *	@grp_id: group id for this group
- *	@interruptTransmit: The TX interrupt number for this group
- *	@interruptReceive: The RX interrupt number for this group
- *	@interruptError: The ERROR interrupt number for this group
- *	@int_name_tx: tx interrupt name for this group
- *	@int_name_rx: rx interrupt name for this group
- *	@int_name_er: er interrupt name for this group
+ *	@irqinfo: TX/RX/ER irq data for this group
  */
 
 struct gfar_priv_grp {
@@ -1017,22 +1023,19 @@ struct gfar_priv_grp {
 	struct gfar_private *priv;
 	struct gfar __iomem *regs;
 	unsigned int grp_id;
-	unsigned long rx_bit_map;
-	unsigned long tx_bit_map;
-	unsigned long num_tx_queues;
 	unsigned long num_rx_queues;
+	unsigned long rx_bit_map;
+	/* cacheline 3 */
 	unsigned int rstat;
 	unsigned int tstat;
-	unsigned int imask;
-	unsigned int ievent;
-	unsigned int interruptTransmit;
-	unsigned int interruptReceive;
-	unsigned int interruptError;
+	unsigned long num_tx_queues;
+	unsigned long tx_bit_map;
 
-	char int_name_tx[GFAR_INT_NAME_MAX];
-	char int_name_rx[GFAR_INT_NAME_MAX];
-	char int_name_er[GFAR_INT_NAME_MAX];
+	struct gfar_irqinfo *irqinfo[GFAR_NUM_IRQS];
 };
+
+#define gfar_irq(grp, ID) \
+	((grp)->irqinfo[GFAR_##ID])
 
 enum gfar_errata {
 	GFAR_ERRATA_74		= 0x01,
