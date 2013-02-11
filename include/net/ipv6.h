@@ -222,6 +222,7 @@ struct ip6_flowlabel {
 	struct in6_addr		dst;
 	struct ipv6_txoptions	*opt;
 	unsigned long		linger;
+	struct rcu_head		rcu;
 	u8			share;
 	union {
 		struct pid *pid;
@@ -238,6 +239,7 @@ struct ip6_flowlabel {
 struct ipv6_fl_socklist {
 	struct ipv6_fl_socklist	*next;
 	struct ip6_flowlabel	*fl;
+	struct rcu_head		rcu;
 };
 
 extern struct ip6_flowlabel	*fl6_sock_lookup(struct sock *sk, __be32 label);

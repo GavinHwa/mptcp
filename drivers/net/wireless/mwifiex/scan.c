@@ -1309,7 +1309,6 @@ int mwifiex_scan_networks(struct mwifiex_private *priv,
 	struct cmd_ctrl_node *cmd_node;
 	union mwifiex_scan_cmd_config_tlv *scan_cfg_out;
 	struct mwifiex_ie_types_chan_list_param_set *chan_list_out;
-	u32 buf_size;
 	struct mwifiex_chan_scan_param_set *scan_chan_list;
 	u8 filtered_scan;
 	u8 scan_current_chan_only;
@@ -1332,18 +1331,16 @@ int mwifiex_scan_networks(struct mwifiex_private *priv,
 	spin_unlock_irqrestore(&adapter->mwifiex_cmd_lock, flags);
 
 	scan_cfg_out = kzalloc(sizeof(union mwifiex_scan_cmd_config_tlv),
-								GFP_KERNEL);
+			       GFP_KERNEL);
 	if (!scan_cfg_out) {
-		dev_err(adapter->dev, "failed to alloc scan_cfg_out\n");
 		ret = -ENOMEM;
 		goto done;
 	}
 
-	buf_size = sizeof(struct mwifiex_chan_scan_param_set) *
-						MWIFIEX_USER_SCAN_CHAN_MAX;
-	scan_chan_list = kzalloc(buf_size, GFP_KERNEL);
+	scan_chan_list = kcalloc(MWIFIEX_USER_SCAN_CHAN_MAX,
+				 sizeof(struct mwifiex_chan_scan_param_set),
+				 GFP_KERNEL);
 	if (!scan_chan_list) {
-		dev_err(adapter->dev, "failed to alloc scan_chan_list\n");
 		kfree(scan_cfg_out);
 		ret = -ENOMEM;
 		goto done;
@@ -1461,12 +1458,9 @@ static int mwifiex_update_curr_bss_params(struct mwifiex_private *priv,
 	unsigned long flags;
 
 	/* Allocate and fill new bss descriptor */
-	bss_desc = kzalloc(sizeof(struct mwifiex_bssdescriptor),
-			GFP_KERNEL);
-	if (!bss_desc) {
-		dev_err(priv->adapter->dev, " failed to alloc bss_desc\n");
+	bss_desc = kzalloc(sizeof(struct mwifiex_bssdescriptor), GFP_KERNEL);
+	if (!bss_desc)
 		return -ENOMEM;
-	}
 
 	ret = mwifiex_fill_new_bss_desc(priv, bss, bss_desc);
 	if (ret)
@@ -1563,7 +1557,7 @@ int mwifiex_ret_802_11_scan(struct mwifiex_private *priv,
 		dev_err(adapter->dev, "SCAN_RESP: too many AP returned (%d)\n",
 			scan_rsp->number_of_sets);
 		ret = -1;
-		goto done;
+		goto check_next_scan;
 	}
 
 	bytes_left = le16_to_cpu(scan_rsp->bss_descript_size);
@@ -1634,7 +1628,8 @@ int mwifiex_ret_802_11_scan(struct mwifiex_private *priv,
 		if (!beacon_size || beacon_size > bytes_left) {
 			bss_info += bytes_left;
 			bytes_left = 0;
-			return -1;
+			ret = -1;
+			goto check_next_scan;
 		}
 
 		/* Initialize the current working beacon pointer for this BSS
@@ -1690,7 +1685,7 @@ int mwifiex_ret_802_11_scan(struct mwifiex_private *priv,
 				dev_err(priv->adapter->dev,
 					"%s: bytes left < IE length\n",
 					__func__);
-				goto done;
+				goto check_next_scan;
 			}
 			if (element_id == WLAN_EID_DS_PARAMS) {
 				channel = *(current_ptr + sizeof(struct ieee_types_header));
@@ -1753,6 +1748,7 @@ int mwifiex_ret_802_11_scan(struct mwifiex_private *priv,
 		}
 	}
 
+check_next_scan:
 	spin_lock_irqsave(&adapter->scan_pending_q_lock, flags);
 	if (list_empty(&adapter->scan_pending_q)) {
 		spin_unlock_irqrestore(&adapter->scan_pending_q_lock, flags);
@@ -1813,7 +1809,6 @@ int mwifiex_ret_802_11_scan(struct mwifiex_private *priv,
 		}
 	}
 
-done:
 	return ret;
 }
 
@@ -1879,10 +1874,8 @@ static int mwifiex_scan_specific_ssid(struct mwifiex_private *priv,
 	}
 
 	scan_cfg = kzalloc(sizeof(struct mwifiex_user_scan_cfg), GFP_KERNEL);
-	if (!scan_cfg) {
-		dev_err(adapter->dev, "failed to alloc scan_cfg\n");
+	if (!scan_cfg)
 		return -ENOMEM;
-	}
 
 	scan_cfg->ssid_list = req_ssid;
 	scan_cfg->num_ssids = 1;
@@ -1996,11 +1989,8 @@ mwifiex_save_curr_bcn(struct mwifiex_private *priv)
 		kfree(priv->curr_bcn_buf);
 		priv->curr_bcn_buf = kmalloc(curr_bss->beacon_buf_size,
 					     GFP_ATOMIC);
-		if (!priv->curr_bcn_buf) {
-			dev_err(priv->adapter->dev,
-				"failed to alloc curr_bcn_buf\n");
+		if (!priv->curr_bcn_buf)
 			return;
-		}
 	}
 
 	memcpy(priv->curr_bcn_buf, curr_bss->beacon_buf,

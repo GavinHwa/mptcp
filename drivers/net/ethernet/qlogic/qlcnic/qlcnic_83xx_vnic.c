@@ -1,3 +1,10 @@
+/*
+ * QLogic qlcnic NIC Driver
+ * Copyright (c) 2009-2013 QLogic Corporation
+ *
+ * See LICENSE.qlcnic for copyright and licensing details.
+ */
+
 #include "qlcnic.h"
 #include "qlcnic_hw.h"
 
@@ -98,6 +105,7 @@ static int qlcnic_83xx_init_mgmt_vnic(struct qlcnic_adapter *adapter)
 {
 	int err = -EIO;
 
+	qlcnic_83xx_get_minidump_template(adapter);
 	if (!(adapter->flags & QLCNIC_ADAPTER_INITIALIZED)) {
 		if (qlcnic_init_pci_info(adapter))
 			return err;
@@ -130,6 +138,7 @@ static int qlcnic_83xx_init_privileged_vnic(struct qlcnic_adapter *adapter)
 {
 	int err = -EIO;
 
+	qlcnic_83xx_get_minidump_template(adapter);
 	if (qlcnic_83xx_get_port_info(adapter))
 		return err;
 

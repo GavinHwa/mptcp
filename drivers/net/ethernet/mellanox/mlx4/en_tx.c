@@ -294,6 +294,8 @@ int mlx4_en_free_tx_buf(struct net_device *dev, struct mlx4_en_tx_ring *ring)
 		cnt++;
 	}
 
+	netdev_tx_reset_queue(ring->tx_queue);
+
 	if (cnt)
 		en_dbg(DRV, priv, "Freed %d uncompleted tx descriptors\n", cnt);
 
@@ -640,7 +642,7 @@ netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev)
 		ring->tx_csum++;
 	}
 
-	if (mlx4_is_mfunc(mdev->dev) || priv->validate_loopback) {
+	if (priv->flags & MLX4_EN_FLAG_ENABLE_HW_LOOPBACK) {
 		/* Copy dst mac address to wqe. This allows loopback in eSwitch,
 		 * so that VFs and PF can communicate with each other
 		 */

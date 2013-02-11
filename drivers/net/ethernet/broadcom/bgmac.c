@@ -761,6 +761,26 @@ static void bgmac_cmdcfg_maskset(struct bgmac *bgmac, u32 mask, u32 set,
 	udelay(2);
 }
 
+static void bgmac_write_mac_address(struct bgmac *bgmac, u8 *addr)
+{
+	u32 tmp;
+
+	tmp = (addr[0] << 24) | (addr[1] << 16) | (addr[2] << 8) | addr[3];
+	bgmac_write(bgmac, BGMAC_MACADDR_HIGH, tmp);
+	tmp = (addr[4] << 8) | addr[5];
+	bgmac_write(bgmac, BGMAC_MACADDR_LOW, tmp);
+}
+
+static void bgmac_set_rx_mode(struct net_device *net_dev)
+{
+	struct bgmac *bgmac = netdev_priv(net_dev);
+
+	if (net_dev->flags & IFF_PROMISC)
+		bgmac_cmdcfg_maskset(bgmac, ~0, BGMAC_CMDCFG_PROM, true);
+	else
+		bgmac_cmdcfg_maskset(bgmac, ~BGMAC_CMDCFG_PROM, 0, true);
+}
+
 #if 0 /* We don't use that regs yet */
 static void bgmac_chip_stats_update(struct bgmac *bgmac)
 {
@@ -889,8 +909,10 @@ static void bgmac_chip_reset(struct bgmac *bgmac)
 			sw_type = et_swtype;
 		} else if (ci->id == BCMA_CHIP_ID_BCM5357 && ci->pkg == 9) {
 			sw_type = BGMAC_CHIPCTL_1_SW_TYPE_EPHYRMII;
-		} else if (0) {
-			/* TODO */
+		} else if ((ci->id != BCMA_CHIP_ID_BCM53572 && ci->pkg == 10) ||
+			   (ci->id == BCMA_CHIP_ID_BCM53572 && ci->pkg == 9)) {
+			sw_type = BGMAC_CHIPCTL_1_IF_TYPE_RGMII |
+				  BGMAC_CHIPCTL_1_SW_TYPE_RGMII;
 		}
 		bcma_chipco_chipctl_maskset(cc, 1,
 					    ~(BGMAC_CHIPCTL_1_IF_TYPE_MASK |
@@ -1004,8 +1026,6 @@ static void bgmac_enable(struct bgmac *bgmac)
 static void bgmac_chip_init(struct bgmac *bgmac, bool full_init)
 {
 	struct bgmac_dma_ring *ring;
-	u8 *mac = bgmac->net_dev->dev_addr;
-	u32 tmp;
 	int i;
 
 	/* 1 interrupt per received frame */
@@ -1014,21 +1034,14 @@ static void bgmac_chip_init(struct bgmac *bgmac, bool full_init)
 	/* Enable 802.3x tx flow control (honor received PAUSE frames) */
 	bgmac_cmdcfg_maskset(bgmac, ~BGMAC_CMDCFG_RPI, 0, true);
 
-	if (bgmac->net_dev->flags & IFF_PROMISC)
-		bgmac_cmdcfg_maskset(bgmac, ~0, BGMAC_CMDCFG_PROM, false);
-	else
-		bgmac_cmdcfg_maskset(bgmac, ~BGMAC_CMDCFG_PROM, 0, false);
+	bgmac_set_rx_mode(bgmac->net_dev);
 
-	/* Set MAC addr */
-	tmp = (mac[0] << 24) | (mac[1] << 16) | (mac[2] << 8) | mac[3];
-	bgmac_write(bgmac, BGMAC_MACADDR_HIGH, tmp);
-	tmp = (mac[4] << 8) | mac[5];
-	bgmac_write(bgmac, BGMAC_MACADDR_LOW, tmp);
+	bgmac_write_mac_address(bgmac, bgmac->net_dev->dev_addr);
 
 	if (bgmac->loopback)
-		bgmac_cmdcfg_maskset(bgmac, ~0, BGMAC_CMDCFG_ML, true);
+		bgmac_cmdcfg_maskset(bgmac, ~0, BGMAC_CMDCFG_ML, false);
 	else
-		bgmac_cmdcfg_maskset(bgmac, ~BGMAC_CMDCFG_ML, 0, true);
+		bgmac_cmdcfg_maskset(bgmac, ~BGMAC_CMDCFG_ML, 0, false);
 
 	bgmac_write(bgmac, BGMAC_RXMAX_LENGTH, 32 + ETHER_MAX_LEN);
 
@@ -1160,6 +1173,19 @@ static netdev_tx_t bgmac_start_xmit(struct sk_buff *skb,
 	return bgmac_dma_tx_add(bgmac, ring, skb);
 }
 
+static int bgmac_set_mac_address(struct net_device *net_dev, void *addr)
+{
+	struct bgmac *bgmac = netdev_priv(net_dev);
+	int ret;
+
+	ret = eth_prepare_mac_addr_change(net_dev, addr);
+	if (ret < 0)
+		return ret;
+	bgmac_write_mac_address(bgmac, (u8 *)addr);
+	eth_commit_mac_addr_change(net_dev, addr);
+	return 0;
+}
+
 static int bgmac_ioctl(struct net_device *net_dev, struct ifreq *ifr, int cmd)
 {
 	struct bgmac *bgmac = netdev_priv(net_dev);
@@ -1190,7 +1216,9 @@ static const struct net_device_ops bgmac_netdev_ops = {
 	.ndo_open		= bgmac_open,
 	.ndo_stop		= bgmac_stop,
 	.ndo_start_xmit		= bgmac_start_xmit,
-	.ndo_set_mac_address	= eth_mac_addr, /* generic, sets dev_addr */
+	.ndo_set_rx_mode	= bgmac_set_rx_mode,
+	.ndo_set_mac_address	= bgmac_set_mac_address,
+	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_do_ioctl           = bgmac_ioctl,
 };
 
@@ -1288,6 +1316,12 @@ static int bgmac_probe(struct bcma_device *core)
 	if (core->core_unit > 1) {
 		pr_err("Unsupported core_unit %d\n", core->core_unit);
 		return -ENOTSUPP;
+	}
+
+	if (!is_valid_ether_addr(mac)) {
+		dev_err(&core->dev, "Invalid MAC addr: %pM\n", mac);
+		eth_random_addr(mac);
+		dev_warn(&core->dev, "Using random MAC: %pM\n", mac);
 	}
 
 	/* Allocation and references */

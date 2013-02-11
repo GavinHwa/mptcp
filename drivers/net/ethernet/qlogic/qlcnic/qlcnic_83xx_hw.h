@@ -1,3 +1,10 @@
+/*
+ * QLogic qlcnic NIC Driver
+ * Copyright (c) 2009-2013 QLogic Corporation
+ *
+ * See LICENSE.qlcnic for copyright and licensing details.
+ */
+
 #ifndef __QLCNIC_83XX_HW_H
 #define __QLCNIC_83XX_HW_H
 
@@ -130,9 +137,6 @@ struct qlc_83xx_reset {
 #define QLC_83XX_IDC_MINOR_VERSION			0
 #define QLC_83XX_IDC_FLASH_PARAM_ADDR			0x3e8020
 
-/* Mailbox process AEN count */
-#define QLC_83XX_MBX_AEN_CNT 5
-
 struct qlcnic_adapter;
 struct qlc_83xx_idc {
 	int (*state_entry) (struct qlcnic_adapter *);
@@ -148,6 +152,12 @@ struct qlc_83xx_idc {
 	u8		quiesce_req;
 	char		**name;
 };
+
+#define QLCNIC_MBX_RSP(reg)		LSW(reg)
+#define QLCNIC_MBX_NUM_REGS(reg)	(MSW(reg) & 0x1FF)
+#define QLCNIC_MBX_STATUS(reg)		(((reg) >> 25) & 0x7F)
+#define QLCNIC_MBX_HOST(ahw, i)	((ahw)->pci_base0 + ((i) * 4))
+#define QLCNIC_MBX_FW(ahw, i)		((ahw)->pci_base0 + 0x800 + ((i) * 4))
 
 /* Mailbox process AEN count */
 #define QLC_83XX_IDC_COMP_AEN			3
@@ -418,7 +428,7 @@ int qlcnic_83xx_test_link(struct qlcnic_adapter *);
 int qlcnic_83xx_reg_test(struct qlcnic_adapter *);
 int qlcnic_83xx_get_regs_len(struct qlcnic_adapter *);
 int qlcnic_83xx_get_registers(struct qlcnic_adapter *, u32 *);
-int qlcnic_83xx_interrupt_test(struct qlcnic_adapter *,
-			       struct qlcnic_cmd_args *);
+int qlcnic_83xx_loopback_test(struct net_device *, u8);
+int qlcnic_83xx_interrupt_test(struct net_device *);
 int qlcnic_83xx_flash_test(struct qlcnic_adapter *);
 #endif

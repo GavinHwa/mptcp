@@ -1,3 +1,10 @@
+/*
+ * QLogic qlcnic NIC Driver
+ * Copyright (c) 2009-2013 QLogic Corporation
+ *
+ * See LICENSE.qlcnic for copyright and licensing details.
+ */
+
 #ifndef __QLCNIC_HW_H
 #define __QLCNIC_HW_H
 
@@ -128,6 +135,7 @@ struct qlcnic_mailbox_metadata {
 
 #define QLCNIC_MBX_RSP_OK	1
 #define QLCNIC_MBX_PORT_RSP_OK	0x1a
+#define QLCNIC_MBX_ASYNC_EVENT	BIT_15
 
 struct qlcnic_pci_info;
 struct qlcnic_info;

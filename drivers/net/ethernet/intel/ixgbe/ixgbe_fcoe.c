@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2012 Intel Corporation.
+  Copyright(c) 1999 - 2013 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -716,10 +716,8 @@ int ixgbe_setup_fcoe_ddp_resources(struct ixgbe_adapter *adapter)
 
 	/* Extra buffer to be shared by all DDPs for HW work around */
 	buffer = kmalloc(IXGBE_FCBUFF_MIN, GFP_ATOMIC);
-	if (!buffer) {
-		e_err(drv, "failed to allocate extra DDP buffer\n");
+	if (!buffer)
 		return -ENOMEM;
-	}
 
 	dma = dma_map_single(dev, buffer, IXGBE_FCBUFF_MIN, DMA_FROM_DEVICE);
 	if (dma_mapping_error(dev, dma)) {

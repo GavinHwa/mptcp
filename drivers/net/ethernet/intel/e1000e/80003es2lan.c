@@ -32,69 +32,6 @@
 
 #include "e1000.h"
 
-#define E1000_KMRNCTRLSTA_OFFSET_FIFO_CTRL	 0x00
-#define E1000_KMRNCTRLSTA_OFFSET_INB_CTRL	 0x02
-#define E1000_KMRNCTRLSTA_OFFSET_HD_CTRL	 0x10
-#define E1000_KMRNCTRLSTA_OFFSET_MAC2PHY_OPMODE	 0x1F
-
-#define E1000_KMRNCTRLSTA_FIFO_CTRL_RX_BYPASS	 0x0008
-#define E1000_KMRNCTRLSTA_FIFO_CTRL_TX_BYPASS	 0x0800
-#define E1000_KMRNCTRLSTA_INB_CTRL_DIS_PADDING	 0x0010
-
-#define E1000_KMRNCTRLSTA_HD_CTRL_10_100_DEFAULT 0x0004
-#define E1000_KMRNCTRLSTA_HD_CTRL_1000_DEFAULT	 0x0000
-#define E1000_KMRNCTRLSTA_OPMODE_E_IDLE		 0x2000
-
-#define E1000_KMRNCTRLSTA_OPMODE_MASK		 0x000C
-#define E1000_KMRNCTRLSTA_OPMODE_INBAND_MDIO	 0x0004
-
-#define E1000_TCTL_EXT_GCEX_MASK 0x000FFC00 /* Gigabit Carry Extend Padding */
-#define DEFAULT_TCTL_EXT_GCEX_80003ES2LAN	 0x00010000
-
-#define DEFAULT_TIPG_IPGT_1000_80003ES2LAN	 0x8
-#define DEFAULT_TIPG_IPGT_10_100_80003ES2LAN	 0x9
-
-/* GG82563 PHY Specific Status Register (Page 0, Register 16 */
-#define GG82563_PSCR_POLARITY_REVERSAL_DISABLE	 0x0002 /* 1=Reversal Disab. */
-#define GG82563_PSCR_CROSSOVER_MODE_MASK	 0x0060
-#define GG82563_PSCR_CROSSOVER_MODE_MDI		 0x0000 /* 00=Manual MDI */
-#define GG82563_PSCR_CROSSOVER_MODE_MDIX	 0x0020 /* 01=Manual MDIX */
-#define GG82563_PSCR_CROSSOVER_MODE_AUTO	 0x0060 /* 11=Auto crossover */
-
-/* PHY Specific Control Register 2 (Page 0, Register 26) */
-#define GG82563_PSCR2_REVERSE_AUTO_NEG		 0x2000
-						/* 1=Reverse Auto-Negotiation */
-
-/* MAC Specific Control Register (Page 2, Register 21) */
-/* Tx clock speed for Link Down and 1000BASE-T for the following speeds */
-#define GG82563_MSCR_TX_CLK_MASK		 0x0007
-#define GG82563_MSCR_TX_CLK_10MBPS_2_5		 0x0004
-#define GG82563_MSCR_TX_CLK_100MBPS_25		 0x0005
-#define GG82563_MSCR_TX_CLK_1000MBPS_25		 0x0007
-
-#define GG82563_MSCR_ASSERT_CRS_ON_TX		 0x0010 /* 1=Assert */
-
-/* DSP Distance Register (Page 5, Register 26) */
-#define GG82563_DSPD_CABLE_LENGTH		 0x0007 /* 0 = <50M
-							   1 = 50-80M
-							   2 = 80-110M
-							   3 = 110-140M
-							   4 = >140M
-							*/
-
-/* Kumeran Mode Control Register (Page 193, Register 16) */
-#define GG82563_KMCR_PASS_FALSE_CARRIER		 0x0800
-
-/* Max number of times Kumeran read/write should be validated */
-#define GG82563_MAX_KMRN_RETRY  0x5
-
-/* Power Management Control Register (Page 193, Register 20) */
-#define GG82563_PMCR_ENABLE_ELECTRICAL_IDLE	 0x0001
-					   /* 1=Enable SERDES Electrical Idle */
-
-/* In-Band Control Register (Page 194, Register 18) */
-#define GG82563_ICR_DIS_PADDING			 0x0010 /* Disable Padding */
-
 /* A table for the GG82563 cable length where the range is defined
  * with a lower bound at "index" and the upper bound at
  * "index + 5".
@@ -624,16 +561,16 @@ static s32 e1000_phy_force_speed_duplex_80003es2lan(struct e1000_hw *hw)
 
 	e_dbg("GG82563 PSCR: %X\n", phy_data);
 
-	ret_val = e1e_rphy(hw, PHY_CONTROL, &phy_data);
+	ret_val = e1e_rphy(hw, MII_BMCR, &phy_data);
 	if (ret_val)
 		return ret_val;
 
 	e1000e_phy_force_speed_duplex_setup(hw, &phy_data);
 
 	/* Reset the phy to commit changes. */
-	phy_data |= MII_CR_RESET;
+	phy_data |= BMCR_RESET;
 
-	ret_val = e1e_wphy(hw, PHY_CONTROL, phy_data);
+	ret_val = e1e_wphy(hw, MII_BMCR, phy_data);
 	if (ret_val)
 		return ret_val;
 
@@ -1438,18 +1375,18 @@ static const struct e1000_phy_operations es2_phy_ops = {
 	.acquire		= e1000_acquire_phy_80003es2lan,
 	.check_polarity		= e1000_check_polarity_m88,
 	.check_reset_block	= e1000e_check_reset_block_generic,
-	.commit		 	= e1000e_phy_sw_reset,
-	.force_speed_duplex 	= e1000_phy_force_speed_duplex_80003es2lan,
-	.get_cfg_done       	= e1000_get_cfg_done_80003es2lan,
-	.get_cable_length   	= e1000_get_cable_length_80003es2lan,
-	.get_info       	= e1000e_get_phy_info_m88,
-	.read_reg       	= e1000_read_phy_reg_gg82563_80003es2lan,
+	.commit			= e1000e_phy_sw_reset,
+	.force_speed_duplex	= e1000_phy_force_speed_duplex_80003es2lan,
+	.get_cfg_done		= e1000_get_cfg_done_80003es2lan,
+	.get_cable_length	= e1000_get_cable_length_80003es2lan,
+	.get_info		= e1000e_get_phy_info_m88,
+	.read_reg		= e1000_read_phy_reg_gg82563_80003es2lan,
 	.release		= e1000_release_phy_80003es2lan,
-	.reset		  	= e1000e_phy_hw_reset_generic,
-	.set_d0_lplu_state  	= NULL,
-	.set_d3_lplu_state  	= e1000e_set_d3_lplu_state,
-	.write_reg      	= e1000_write_phy_reg_gg82563_80003es2lan,
-	.cfg_on_link_up      	= e1000_cfg_on_link_up_80003es2lan,
+	.reset			= e1000e_phy_hw_reset_generic,
+	.set_d0_lplu_state	= NULL,
+	.set_d3_lplu_state	= e1000e_set_d3_lplu_state,
+	.write_reg		= e1000_write_phy_reg_gg82563_80003es2lan,
+	.cfg_on_link_up		= e1000_cfg_on_link_up_80003es2lan,
 };
 
 static const struct e1000_nvm_operations es2_nvm_ops = {

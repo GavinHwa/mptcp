@@ -1266,6 +1266,14 @@ static int __dev_open(struct net_device *dev)
 	if (!netif_device_present(dev))
 		return -ENODEV;
 
+	/* Block netpoll from trying to do any rx path servicing.
+	 * If we don't do this there is a chance ndo_poll_controller
+	 * or ndo_poll may be running while we open the device
+	 */
+	ret = netpoll_rx_disable(dev);
+	if (ret)
+		return ret;
+
 	ret = call_netdevice_notifiers(NETDEV_PRE_UP, dev);
 	ret = notifier_to_errno(ret);
 	if (ret)
@@ -1278,6 +1286,8 @@ static int __dev_open(struct net_device *dev)
 
 	if (!ret && ops->ndo_open)
 		ret = ops->ndo_open(dev);
+
+	netpoll_rx_enable(dev);
 
 	if (ret)
 		clear_bit(__LINK_STATE_START, &dev->state);
@@ -1370,9 +1380,16 @@ static int __dev_close(struct net_device *dev)
 	int retval;
 	LIST_HEAD(single);
 
+	/* Temporarily disable netpoll until the interface is down */
+	retval = netpoll_rx_disable(dev);
+	if (retval)
+		return retval;
+
 	list_add(&dev->unreg_list, &single);
 	retval = __dev_close_many(&single);
 	list_del(&single);
+
+	netpoll_rx_enable(dev);
 	return retval;
 }
 
@@ -1408,14 +1425,22 @@ static int dev_close_many(struct list_head *head)
  */
 int dev_close(struct net_device *dev)
 {
+	int ret = 0;
 	if (dev->flags & IFF_UP) {
 		LIST_HEAD(single);
+
+		/* Block netpoll rx while the interface is going down */
+		ret = netpoll_rx_disable(dev);
+		if (ret)
+			return ret;
 
 		list_add(&dev->unreg_list, &single);
 		dev_close_many(&single);
 		list_del(&single);
+
+		netpoll_rx_enable(dev);
 	}
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(dev_close);
 
@@ -2302,18 +2327,29 @@ out:
 }
 EXPORT_SYMBOL(skb_checksum_help);
 
+/* openvswitch calls this on rx path, so we need a different check.
+ */
+static inline bool skb_needs_check(struct sk_buff *skb, bool tx_path)
+{
+	if (tx_path)
+		return skb->ip_summed != CHECKSUM_PARTIAL;
+	else
+		return skb->ip_summed == CHECKSUM_NONE;
+}
+
 /**
- *	skb_gso_segment - Perform segmentation on skb.
+ *	__skb_gso_segment - Perform segmentation on skb.
  *	@skb: buffer to segment
  *	@features: features for the output path (see dev->features)
+ *	@tx_path: whether it is called in TX path
  *
  *	This function segments the given skb and returns a list of segments.
  *
  *	It may return NULL if the skb requires no segmentation.  This is
  *	only possible when GSO is used for verifying header integrity.
  */
-struct sk_buff *skb_gso_segment(struct sk_buff *skb,
-	netdev_features_t features)
+struct sk_buff *__skb_gso_segment(struct sk_buff *skb,
+				  netdev_features_t features, bool tx_path)
 {
 	struct sk_buff *segs = ERR_PTR(-EPROTONOSUPPORT);
 	struct packet_offload *ptype;
@@ -2336,7 +2372,7 @@ struct sk_buff *skb_gso_segment(struct sk_buff *skb,
 	skb->mac_len = skb->network_header - skb->mac_header;
 	__skb_pull(skb, skb->mac_len);
 
-	if (unlikely(skb->ip_summed != CHECKSUM_PARTIAL)) {
+	if (unlikely(skb_needs_check(skb, tx_path))) {
 		skb_warn_bad_offload(skb);
 
 		if (skb_header_cloned(skb) &&
@@ -2365,7 +2401,7 @@ struct sk_buff *skb_gso_segment(struct sk_buff *skb,
 
 	return segs;
 }
-EXPORT_SYMBOL(skb_gso_segment);
+EXPORT_SYMBOL(__skb_gso_segment);
 
 /* Take action when hardware reception checksum errors are detected. */
 #ifdef CONFIG_BUG
@@ -2798,6 +2834,8 @@ int dev_queue_xmit(struct sk_buff *skb)
 	struct netdev_queue *txq;
 	struct Qdisc *q;
 	int rc = -ENOMEM;
+
+	skb_reset_mac_header(skb);
 
 	/* Disable soft irqs for various locks below. Also
 	 * stops preemption for RCU.
@@ -5958,10 +5996,9 @@ static int netif_alloc_rx_queues(struct net_device *dev)
 	BUG_ON(count < 1);
 
 	rx = kcalloc(count, sizeof(struct netdev_rx_queue), GFP_KERNEL);
-	if (!rx) {
-		pr_err("netdev: Unable to allocate %u rx queues\n", count);
+	if (!rx)
 		return -ENOMEM;
-	}
+
 	dev->_rx = rx;
 
 	for (i = 0; i < count; i++)
@@ -5992,10 +6029,9 @@ static int netif_alloc_netdev_queues(struct net_device *dev)
 	BUG_ON(count < 1);
 
 	tx = kcalloc(count, sizeof(struct netdev_queue), GFP_KERNEL);
-	if (!tx) {
-		pr_err("netdev: Unable to allocate %u tx queues\n", count);
+	if (!tx)
 		return -ENOMEM;
-	}
+
 	dev->_tx = tx;
 
 	netdev_for_each_tx_queue(dev, netdev_init_one_queue, NULL);
@@ -6482,10 +6518,8 @@ struct net_device *alloc_netdev_mqs(int sizeof_priv, const char *name,
 	alloc_size += NETDEV_ALIGN - 1;
 
 	p = kzalloc(alloc_size, GFP_KERNEL);
-	if (!p) {
-		pr_err("alloc_netdev: Unable to allocate device\n");
+	if (!p)
 		return NULL;
-	}
 
 	dev = PTR_ALIGN(p, NETDEV_ALIGN);
 	dev->padded = (char *)dev - (char *)p;

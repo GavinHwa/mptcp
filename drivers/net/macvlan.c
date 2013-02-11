@@ -29,6 +29,7 @@
 #include <linux/if_vlan.h>
 #include <linux/if_link.h>
 #include <linux/if_macvlan.h>
+#include <linux/hash.h>
 #include <net/rtnetlink.h>
 #include <net/xfrm.h>
 
@@ -126,6 +127,21 @@ static int macvlan_broadcast_one(struct sk_buff *skb,
 	return vlan->receive(skb);
 }
 
+static u32 macvlan_hash_mix(const struct macvlan_dev *vlan)
+{
+	return (u32)(((unsigned long)vlan) >> L1_CACHE_SHIFT);
+}
+
+
+static unsigned int mc_hash(const struct macvlan_dev *vlan,
+			    const unsigned char *addr)
+{
+	u32 val = __get_unaligned_cpu32(addr + 2);
+
+	val ^= macvlan_hash_mix(vlan);
+	return hash_32(val, MACVLAN_MC_FILTER_BITS);
+}
+
 static void macvlan_broadcast(struct sk_buff *skb,
 			      const struct macvlan_port *port,
 			      struct net_device *src,
@@ -137,6 +153,7 @@ static void macvlan_broadcast(struct sk_buff *skb,
 	struct sk_buff *nskb;
 	unsigned int i;
 	int err;
+	unsigned int hash;
 
 	if (skb->protocol == htons(ETH_P_PAUSE))
 		return;
@@ -146,6 +163,9 @@ static void macvlan_broadcast(struct sk_buff *skb,
 			if (vlan->dev == src || !(vlan->mode & mode))
 				continue;
 
+			hash = mc_hash(vlan, eth->h_dest);
+			if (!test_bit(hash, vlan->mc_filter))
+				continue;
 			nskb = skb_clone(skb, GFP_ATOMIC);
 			err = macvlan_broadcast_one(nskb, vlan, eth,
 					 mode == MACVLAN_MODE_BRIDGE);
@@ -405,6 +425,21 @@ static void macvlan_set_mac_lists(struct net_device *dev)
 {
 	struct macvlan_dev *vlan = netdev_priv(dev);
 
+	if (dev->flags & (IFF_PROMISC | IFF_ALLMULTI)) {
+		bitmap_fill(vlan->mc_filter, MACVLAN_MC_FILTER_SZ);
+	} else {
+		struct netdev_hw_addr *ha;
+		DECLARE_BITMAP(filter, MACVLAN_MC_FILTER_SZ);
+
+		bitmap_zero(filter, MACVLAN_MC_FILTER_SZ);
+		netdev_for_each_mc_addr(ha, dev) {
+			__set_bit(mc_hash(vlan, ha->addr), filter);
+		}
+
+		__set_bit(mc_hash(vlan, dev->broadcast), filter);
+
+		bitmap_copy(vlan->mc_filter, filter, MACVLAN_MC_FILTER_SZ);
+	}
 	dev_uc_sync(vlan->lowerdev, dev);
 	dev_mc_sync(vlan->lowerdev, dev);
 }

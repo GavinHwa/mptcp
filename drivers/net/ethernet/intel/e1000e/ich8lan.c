@@ -57,132 +57,6 @@
 
 #include "e1000.h"
 
-#define ICH_FLASH_GFPREG		0x0000
-#define ICH_FLASH_HSFSTS		0x0004
-#define ICH_FLASH_HSFCTL		0x0006
-#define ICH_FLASH_FADDR			0x0008
-#define ICH_FLASH_FDATA0		0x0010
-#define ICH_FLASH_PR0			0x0074
-
-#define ICH_FLASH_READ_COMMAND_TIMEOUT	500
-#define ICH_FLASH_WRITE_COMMAND_TIMEOUT	500
-#define ICH_FLASH_ERASE_COMMAND_TIMEOUT	3000000
-#define ICH_FLASH_LINEAR_ADDR_MASK	0x00FFFFFF
-#define ICH_FLASH_CYCLE_REPEAT_COUNT	10
-
-#define ICH_CYCLE_READ			0
-#define ICH_CYCLE_WRITE			2
-#define ICH_CYCLE_ERASE			3
-
-#define FLASH_GFPREG_BASE_MASK		0x1FFF
-#define FLASH_SECTOR_ADDR_SHIFT		12
-
-#define ICH_FLASH_SEG_SIZE_256		256
-#define ICH_FLASH_SEG_SIZE_4K		4096
-#define ICH_FLASH_SEG_SIZE_8K		8192
-#define ICH_FLASH_SEG_SIZE_64K		65536
-
-
-#define E1000_ICH_FWSM_RSPCIPHY	0x00000040 /* Reset PHY on PCI Reset */
-/* FW established a valid mode */
-#define E1000_ICH_FWSM_FW_VALID		0x00008000
-
-#define E1000_ICH_MNG_IAMT_MODE		0x2
-
-#define ID_LED_DEFAULT_ICH8LAN  ((ID_LED_DEF1_DEF2 << 12) | \
-				 (ID_LED_DEF1_OFF2 <<  8) | \
-				 (ID_LED_DEF1_ON2  <<  4) | \
-				 (ID_LED_DEF1_DEF2))
-
-#define E1000_ICH_NVM_SIG_WORD		0x13
-#define E1000_ICH_NVM_SIG_MASK		0xC000
-#define E1000_ICH_NVM_VALID_SIG_MASK    0xC0
-#define E1000_ICH_NVM_SIG_VALUE         0x80
-
-#define E1000_ICH8_LAN_INIT_TIMEOUT	1500
-
-#define E1000_FEXTNVM_SW_CONFIG		1
-#define E1000_FEXTNVM_SW_CONFIG_ICH8M (1 << 27) /* Bit redefined for ICH8M :/ */
-
-#define E1000_FEXTNVM3_PHY_CFG_COUNTER_MASK    0x0C000000
-#define E1000_FEXTNVM3_PHY_CFG_COUNTER_50MSEC  0x08000000
-
-#define E1000_FEXTNVM4_BEACON_DURATION_MASK    0x7
-#define E1000_FEXTNVM4_BEACON_DURATION_8USEC   0x7
-#define E1000_FEXTNVM4_BEACON_DURATION_16USEC  0x3
-
-#define PCIE_ICH8_SNOOP_ALL		PCIE_NO_SNOOP_ALL
-
-#define E1000_ICH_RAR_ENTRIES		7
-#define E1000_PCH2_RAR_ENTRIES		5 /* RAR[0], SHRA[0-3] */
-#define E1000_PCH_LPT_RAR_ENTRIES	12 /* RAR[0], SHRA[0-10] */
-
-#define PHY_PAGE_SHIFT 5
-#define PHY_REG(page, reg) (((page) << PHY_PAGE_SHIFT) | \
-			   ((reg) & MAX_PHY_REG_ADDRESS))
-#define IGP3_KMRN_DIAG  PHY_REG(770, 19) /* KMRN Diagnostic */
-#define IGP3_VR_CTRL    PHY_REG(776, 18) /* Voltage Regulator Control */
-
-#define IGP3_KMRN_DIAG_PCS_LOCK_LOSS	0x0002
-#define IGP3_VR_CTRL_DEV_POWERDOWN_MODE_MASK 0x0300
-#define IGP3_VR_CTRL_MODE_SHUTDOWN	0x0200
-
-#define HV_LED_CONFIG		PHY_REG(768, 30) /* LED Configuration */
-
-#define SW_FLAG_TIMEOUT    1000 /* SW Semaphore flag timeout in milliseconds */
-
-/* SMBus Control Phy Register */
-#define CV_SMB_CTRL		PHY_REG(769, 23)
-#define CV_SMB_CTRL_FORCE_SMBUS	0x0001
-
-/* SMBus Address Phy Register */
-#define HV_SMB_ADDR            PHY_REG(768, 26)
-#define HV_SMB_ADDR_MASK       0x007F
-#define HV_SMB_ADDR_PEC_EN     0x0200
-#define HV_SMB_ADDR_VALID      0x0080
-#define HV_SMB_ADDR_FREQ_MASK           0x1100
-#define HV_SMB_ADDR_FREQ_LOW_SHIFT      8
-#define HV_SMB_ADDR_FREQ_HIGH_SHIFT     12
-
-/* PHY Power Management Control */
-#define HV_PM_CTRL		PHY_REG(770, 17)
-#define HV_PM_CTRL_PLL_STOP_IN_K1_GIGA	0x100
-
-/* Intel Rapid Start Technology Support */
-#define I217_PROXY_CTRL                 BM_PHY_REG(BM_WUC_PAGE, 70)
-#define I217_PROXY_CTRL_AUTO_DISABLE    0x0080
-#define I217_SxCTRL                     PHY_REG(BM_PORT_CTRL_PAGE, 28)
-#define I217_SxCTRL_ENABLE_LPI_RESET    0x1000
-#define I217_CGFREG                     PHY_REG(772, 29)
-#define I217_CGFREG_ENABLE_MTA_RESET    0x0002
-#define I217_MEMPWR                     PHY_REG(772, 26)
-#define I217_MEMPWR_DISABLE_SMB_RELEASE 0x0010
-
-/* Strapping Option Register - RO */
-#define E1000_STRAP                     0x0000C
-#define E1000_STRAP_SMBUS_ADDRESS_MASK  0x00FE0000
-#define E1000_STRAP_SMBUS_ADDRESS_SHIFT 17
-#define E1000_STRAP_SMT_FREQ_MASK       0x00003000
-#define E1000_STRAP_SMT_FREQ_SHIFT      12
-
-/* OEM Bits Phy Register */
-#define HV_OEM_BITS            PHY_REG(768, 25)
-#define HV_OEM_BITS_LPLU       0x0004 /* Low Power Link Up */
-#define HV_OEM_BITS_GBE_DIS    0x0040 /* Gigabit Disable */
-#define HV_OEM_BITS_RESTART_AN 0x0400 /* Restart Auto-negotiation */
-
-#define E1000_NVM_K1_CONFIG 0x1B /* NVM K1 Config Word */
-#define E1000_NVM_K1_ENABLE 0x1  /* NVM Enable K1 bit */
-
-/* KMRN Mode Control */
-#define HV_KMRN_MODE_CTRL      PHY_REG(769, 16)
-#define HV_KMRN_MDIO_SLOW      0x0400
-
-/* KMRN FIFO Control and Status */
-#define HV_KMRN_FIFO_CTRLSTA                  PHY_REG(770, 16)
-#define HV_KMRN_FIFO_CTRLSTA_PREAMBLE_MASK    0x7000
-#define HV_KMRN_FIFO_CTRLSTA_PREAMBLE_SHIFT   12
-
 /* ICH GbE Flash Hardware Sequencing Flash Status Register bit breakdown */
 /* Offset 04h HSFSTS */
 union ich8_hws_flash_status {
@@ -312,12 +186,12 @@ static bool e1000_phy_is_accessible_pchlan(struct e1000_hw *hw)
 	u16 retry_count;
 
 	for (retry_count = 0; retry_count < 2; retry_count++) {
-		ret_val = e1e_rphy_locked(hw, PHY_ID1, &phy_reg);
+		ret_val = e1e_rphy_locked(hw, MII_PHYSID1, &phy_reg);
 		if (ret_val || (phy_reg == 0xFFFF))
 			continue;
 		phy_id = (u32)(phy_reg << 16);
 
-		ret_val = e1e_rphy_locked(hw, PHY_ID2, &phy_reg);
+		ret_val = e1e_rphy_locked(hw, MII_PHYSID2, &phy_reg);
 		if (ret_val || (phy_reg == 0xFFFF)) {
 			phy_id = 0;
 			continue;
@@ -882,8 +756,8 @@ static s32 e1000_set_eee_pchlan(struct e1000_hw *hw)
 			lpi_ctrl |= I82579_LPI_CTRL_1000_ENABLE;
 
 		if (dev_spec->eee_lp_ability & I82579_EEE_100_SUPPORTED) {
-			e1e_rphy_locked(hw, PHY_LP_ABILITY, &data);
-			if (data & NWAY_LPAR_100TX_FD_CAPS)
+			e1e_rphy_locked(hw, MII_LPA, &data);
+			if (data & LPA_100FULL)
 				lpi_ctrl |= I82579_LPI_CTRL_100_ENABLE;
 			else
 				/* EEE is not supported in 100Half, so ignore
@@ -1082,7 +956,7 @@ static DEFINE_MUTEX(nvm_mutex);
  *
  *  Acquires the mutex for performing NVM operations.
  **/
-static s32 e1000_acquire_nvm_ich8lan(struct e1000_hw *hw)
+static s32 e1000_acquire_nvm_ich8lan(struct e1000_hw __always_unused *hw)
 {
 	mutex_lock(&nvm_mutex);
 
@@ -1095,7 +969,7 @@ static s32 e1000_acquire_nvm_ich8lan(struct e1000_hw *hw)
  *
  *  Releases the mutex used while performing NVM operations.
  **/
-static void e1000_release_nvm_ich8lan(struct e1000_hw *hw)
+static void e1000_release_nvm_ich8lan(struct e1000_hw __always_unused *hw)
 {
 	mutex_unlock(&nvm_mutex);
 }
@@ -1792,7 +1666,7 @@ static s32 e1000_hv_phy_workarounds_ich8lan(struct e1000_hw *hw)
 		 */
 		if (hw->phy.revision < 2) {
 			e1000e_phy_sw_reset(hw);
-			ret_val = e1e_wphy(hw, PHY_CONTROL, 0x3140);
+			ret_val = e1e_wphy(hw, MII_BMCR, 0x3140);
 		}
 	}
 
@@ -4117,7 +3991,6 @@ void e1000_suspend_workarounds_ich8lan(struct e1000_hw *hw)
 		 * The SMBus release must also be disabled on LCD reset.
 		 */
 		if (!(er32(FWSM) & E1000_ICH_FWSM_FW_VALID)) {
-
 			/* Enable proxy to reset only on power good. */
 			e1e_rphy_locked(hw, I217_PROXY_CTRL, &phy_reg);
 			phy_reg |= I217_PROXY_CTRL_AUTO_DISABLE;
@@ -4507,7 +4380,7 @@ static const struct e1000_mac_operations ich8_mac_ops = {
 	.reset_hw		= e1000_reset_hw_ich8lan,
 	.init_hw		= e1000_init_hw_ich8lan,
 	.setup_link		= e1000_setup_link_ich8lan,
-	.setup_physical_interface= e1000_setup_copper_link_ich8lan,
+	.setup_physical_interface = e1000_setup_copper_link_ich8lan,
 	/* id_led_init dependent on mac type */
 	.config_collision_dist	= e1000e_config_collision_dist_generic,
 	.rar_set		= e1000e_rar_set_generic,
@@ -4529,7 +4402,7 @@ static const struct e1000_phy_operations ich8_phy_ops = {
 
 static const struct e1000_nvm_operations ich8_nvm_ops = {
 	.acquire		= e1000_acquire_nvm_ich8lan,
-	.read		 	= e1000_read_nvm_ich8lan,
+	.read			= e1000_read_nvm_ich8lan,
 	.release		= e1000_release_nvm_ich8lan,
 	.reload			= e1000e_reload_nvm_generic,
 	.update			= e1000_update_nvm_checksum_ich8lan,

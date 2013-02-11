@@ -44,21 +44,6 @@
 
 #include "e1000.h"
 
-#define ID_LED_RESERVED_F746 0xF746
-#define ID_LED_DEFAULT_82573 ((ID_LED_DEF1_DEF2 << 12) | \
-			      (ID_LED_OFF1_ON2  <<  8) | \
-			      (ID_LED_DEF1_DEF2 <<  4) | \
-			      (ID_LED_DEF1_DEF2))
-
-#define E1000_GCR_L1_ACT_WITHOUT_L0S_RX 0x08000000
-#define AN_RETRY_COUNT          5 /* Autoneg Retry Count value */
-#define E1000_BASE1000T_STATUS          10
-#define E1000_IDLE_ERROR_COUNT_MASK     0xFF
-#define E1000_RECEIVE_ERROR_COUNTER     21
-#define E1000_RECEIVE_ERROR_MAX         0xFFFF
-
-#define E1000_NVM_INIT_CTRL2_MNGM 0x6000 /* Manageability Operation Mode mask */
-
 static s32 e1000_get_phy_id_82571(struct e1000_hw *hw);
 static s32 e1000_setup_copper_link_82571(struct e1000_hw *hw);
 static s32 e1000_setup_fiber_serdes_link_82571(struct e1000_hw *hw);
@@ -447,13 +432,13 @@ static s32 e1000_get_phy_id_82571(struct e1000_hw *hw)
 		break;
 	case e1000_82574:
 	case e1000_82583:
-		ret_val = e1e_rphy(hw, PHY_ID1, &phy_id);
+		ret_val = e1e_rphy(hw, MII_PHYSID1, &phy_id);
 		if (ret_val)
 			return ret_val;
 
 		phy->id = (u32)(phy_id << 16);
 		udelay(20);
-		ret_val = e1e_rphy(hw, PHY_ID2, &phy_id);
+		ret_val = e1e_rphy(hw, MII_PHYSID2, &phy_id);
 		if (ret_val)
 			return ret_val;
 
@@ -1327,9 +1312,10 @@ static void e1000_clear_vfta_82571(struct e1000_hw *hw)
 			 */
 			vfta_offset = (hw->mng_cookie.vlan_id >>
 				       E1000_VFTA_ENTRY_SHIFT) &
-				      E1000_VFTA_ENTRY_MASK;
-			vfta_bit_in_reg = 1 << (hw->mng_cookie.vlan_id &
-					       E1000_VFTA_ENTRY_BIT_SHIFT_MASK);
+			    E1000_VFTA_ENTRY_MASK;
+			vfta_bit_in_reg =
+			    1 << (hw->mng_cookie.vlan_id &
+				  E1000_VFTA_ENTRY_BIT_SHIFT_MASK);
 		}
 		break;
 	default:
@@ -1548,7 +1534,6 @@ static s32 e1000_check_for_serdes_link_82571(struct e1000_hw *hw)
 	rxcw = er32(RXCW);
 
 	if ((rxcw & E1000_RXCW_SYNCH) && !(rxcw & E1000_RXCW_IV)) {
-
 		/* Receiver is synchronized with no invalid bits.  */
 		switch (mac->serdes_link_state) {
 		case e1000_serdes_link_autoneg_complete:
@@ -1931,7 +1916,7 @@ static const struct e1000_phy_operations e82_phy_ops_igp = {
 	.set_d0_lplu_state	= e1000_set_d0_lplu_state_82571,
 	.set_d3_lplu_state	= e1000e_set_d3_lplu_state,
 	.write_reg		= e1000e_write_phy_reg_igp,
-	.cfg_on_link_up      	= NULL,
+	.cfg_on_link_up		= NULL,
 };
 
 static const struct e1000_phy_operations e82_phy_ops_m88 = {
@@ -1949,7 +1934,7 @@ static const struct e1000_phy_operations e82_phy_ops_m88 = {
 	.set_d0_lplu_state	= e1000_set_d0_lplu_state_82571,
 	.set_d3_lplu_state	= e1000e_set_d3_lplu_state,
 	.write_reg		= e1000e_write_phy_reg_m88,
-	.cfg_on_link_up      	= NULL,
+	.cfg_on_link_up		= NULL,
 };
 
 static const struct e1000_phy_operations e82_phy_ops_bm = {
@@ -1967,7 +1952,7 @@ static const struct e1000_phy_operations e82_phy_ops_bm = {
 	.set_d0_lplu_state	= e1000_set_d0_lplu_state_82571,
 	.set_d3_lplu_state	= e1000e_set_d3_lplu_state,
 	.write_reg		= e1000e_write_phy_reg_bm2,
-	.cfg_on_link_up      	= NULL,
+	.cfg_on_link_up		= NULL,
 };
 
 static const struct e1000_nvm_operations e82571_nvm_ops = {

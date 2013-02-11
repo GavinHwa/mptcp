@@ -1,3 +1,10 @@
+/*
+ * QLogic qlcnic NIC Driver
+ * Copyright (c) 2009-2013 QLogic Corporation
+ *
+ * See LICENSE.qlcnic for copyright and licensing details.
+ */
+
 #include <linux/netdevice.h>
 #include <linux/if_vlan.h>
 #include <net/ip.h>
@@ -1018,7 +1025,7 @@ qlcnic_process_lro(struct qlcnic_adapter *adapter,
 
 	skb->protocol = eth_type_trans(skb, netdev);
 
-	if (htons(skb->protocol) == ETH_P_IPV6) {
+	if (ntohs(skb->protocol) == ETH_P_IPV6) {
 		ipv6h = (struct ipv6hdr *)skb->data;
 		th = (struct tcphdr *)(skb->data + sizeof(struct ipv6hdr));
 		length = (th->doff << 2) + lro_length;
@@ -1546,6 +1553,24 @@ skip:
 	return count;
 }
 
+static void qlcnic_83xx_poll_process_aen(struct qlcnic_adapter *adapter)
+{
+	unsigned long flags;
+	u32 mask, resp, event;
+
+	spin_lock_irqsave(&adapter->ahw->mbx_lock, flags);
+	resp = QLCRDX(adapter->ahw, QLCNIC_FW_MBX_CTRL);
+	if (!(resp & QLCNIC_SET_OWNER))
+		goto out;
+	event = readl(QLCNIC_MBX_FW(adapter->ahw, 0));
+	if (event &  QLCNIC_MBX_ASYNC_EVENT)
+		qlcnic_83xx_process_aen(adapter);
+out:
+	mask = QLCRDX(adapter->ahw, QLCNIC_DEF_INT_MASK);
+	writel(0, adapter->ahw->pci_base0 + mask);
+	spin_unlock_irqrestore(&adapter->ahw->mbx_lock, flags);
+}
+
 static int qlcnic_83xx_poll(struct napi_struct *napi, int budget)
 {
 	int tx_complete;
@@ -1560,7 +1585,7 @@ static int qlcnic_83xx_poll(struct napi_struct *napi, int budget)
 	tx_ring = adapter->tx_ring;
 
 	if (!(adapter->flags & QLCNIC_MSIX_ENABLED))
-		qlcnic_83xx_process_aen(adapter);
+		qlcnic_83xx_poll_process_aen(adapter);
 
 	tx_complete = qlcnic_process_cmd_ring(adapter, tx_ring, budget);
 	work_done = qlcnic_83xx_process_rcv_ring(sds_ring, budget);

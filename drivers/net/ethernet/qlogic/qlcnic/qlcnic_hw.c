@@ -1,6 +1,6 @@
 /*
  * QLogic qlcnic NIC Driver
- * Copyright (c)  2009-2010 QLogic Corporation
+ * Copyright (c) 2009-2013 QLogic Corporation
  *
  * See LICENSE.qlcnic for copyright and licensing details.
  */
@@ -481,11 +481,9 @@ int qlcnic_nic_add_mac(struct qlcnic_adapter *adapter, const u8 *addr)
 	}
 
 	cur = kzalloc(sizeof(struct qlcnic_mac_list_s), GFP_ATOMIC);
-	if (cur == NULL) {
-		dev_err(&adapter->netdev->dev,
-			"failed to add mac address filter\n");
+	if (cur == NULL)
 		return -ENOMEM;
-	}
+
 	memcpy(cur->mac_addr, addr, ETH_ALEN);
 
 	if (qlcnic_sre_macaddr_change(adapter,
@@ -932,7 +930,8 @@ netdev_features_t qlcnic_fix_features(struct net_device *netdev,
 {
 	struct qlcnic_adapter *adapter = netdev_priv(netdev);
 
-	if ((adapter->flags & QLCNIC_ESWITCH_ENABLED)) {
+	if ((adapter->flags & QLCNIC_ESWITCH_ENABLED) &&
+	    qlcnic_82xx_check(adapter)) {
 		netdev_features_t changed = features ^ netdev->features;
 		features ^= changed & (NETIF_F_ALL_CSUM | NETIF_F_RXCSUM);
 	}
@@ -958,8 +957,10 @@ int qlcnic_set_features(struct net_device *netdev, netdev_features_t features)
 	if (qlcnic_config_hw_lro(adapter, hw_lro))
 		return -EIO;
 
-	if ((hw_lro == 0) && qlcnic_send_lro_cleanup(adapter))
-		return -EIO;
+	if (!hw_lro && qlcnic_82xx_check(adapter)) {
+		if (qlcnic_send_lro_cleanup(adapter))
+			return -EIO;
+	}
 
 	return 0;
 }

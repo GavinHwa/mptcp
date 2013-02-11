@@ -1,3 +1,10 @@
+/*
+ * QLogic qlcnic NIC Driver
+ * Copyright (c) 2009-2013 QLogic Corporation
+ *
+ * See LICENSE.qlcnic for copyright and licensing details.
+ */
+
 #include "qlcnic.h"
 #include "qlcnic_hw.h"
 
@@ -578,6 +585,9 @@ static int qlcnic_83xx_idc_check_fan_failure(struct qlcnic_adapter *adapter)
 
 static int qlcnic_83xx_idc_reattach_driver(struct qlcnic_adapter *adapter)
 {
+	/* register for NIC IDC AEN Events */
+	qlcnic_83xx_register_nic_idc_func(adapter, 1);
+
 	qlcnic_83xx_enable_mbx_intrpt(adapter);
 	if ((adapter->flags & QLCNIC_MSIX_ENABLED)) {
 		if (qlcnic_83xx_config_intrpt(adapter, 1)) {
@@ -1171,12 +1181,9 @@ static int qlcnic_83xx_copy_bootloader(struct qlcnic_adapter *adapter)
 		size = (size + 16) & ~0xF;
 
 	p_cache = kzalloc(size, GFP_KERNEL);
-
-	if (p_cache == NULL) {
-		dev_err(&adapter->pdev->dev,
-			"Failed to allocate memory for boot loader cache\n");
+	if (p_cache == NULL)
 		return -ENOMEM;
-	}
+
 	ret = qlcnic_83xx_lockless_flash_read32(adapter, src, p_cache,
 						size / sizeof(u32));
 	if (ret) {
@@ -1487,12 +1494,9 @@ int qlcnic_83xx_get_reset_instruction_template(struct qlcnic_adapter *p_dev)
 
 	ahw->reset.seq_error = 0;
 	ahw->reset.buff = kzalloc(QLC_83XX_RESTART_TEMPLATE_SIZE, GFP_KERNEL);
-
-	if (p_dev->ahw->reset.buff == NULL) {
-		dev_err(&p_dev->pdev->dev,
-			"%s: resource allocation failed\n", __func__);
+	if (p_dev->ahw->reset.buff == NULL)
 		return -ENOMEM;
-	}
+
 	p_buff = p_dev->ahw->reset.buff;
 	addr = QLC_83XX_RESET_TEMPLATE_ADDR;
 	count = sizeof(struct qlc_83xx_reset_hdr) / sizeof(u32);
@@ -2024,6 +2028,9 @@ int qlcnic_83xx_init(struct qlcnic_adapter *adapter)
 	set_bit(QLC_83XX_MBX_READY, &adapter->ahw->idc.status);
 	qlcnic_83xx_clear_function_resources(adapter);
 
+	/* register for NIC IDC AEN Events */
+	qlcnic_83xx_register_nic_idc_func(adapter, 1);
+
 	if (!qlcnic_83xx_read_flash_descriptor_table(adapter))
 		qlcnic_83xx_read_flash_mfg_id(adapter);
 
@@ -2039,9 +2046,6 @@ int qlcnic_83xx_init(struct qlcnic_adapter *adapter)
 		return -EIO;
 
 	INIT_DELAYED_WORK(&adapter->idc_aen_work, qlcnic_83xx_idc_aen_work);
-
-	/* register for NIC IDC AEN Events */
-	qlcnic_83xx_register_nic_idc_func(adapter, 1);
 
 	/* Periodically monitor device status */
 	qlcnic_83xx_idc_poll_dev_state(&adapter->fw_work.work);

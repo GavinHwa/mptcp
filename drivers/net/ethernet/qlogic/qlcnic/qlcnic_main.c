@@ -1,6 +1,6 @@
 /*
  * QLogic qlcnic NIC Driver
- * Copyright (c)  2009-2010 QLogic Corporation
+ * Copyright (c) 2009-2013 QLogic Corporation
  *
  * See LICENSE.qlcnic for copyright and licensing details.
  */
@@ -414,10 +414,8 @@ int qlcnic_enable_msix(struct qlcnic_adapter *adapter, u32 num_msix)
 		adapter->msix_entries = kcalloc(num_msix,
 						sizeof(struct msix_entry),
 						GFP_KERNEL);
-		if (!adapter->msix_entries) {
-			dev_err(&pdev->dev, "failed allocating msix_entries\n");
+		if (!adapter->msix_entries)
 			return -ENOMEM;
-		}
 	}
 
 	adapter->max_sds_rings = 1;
@@ -457,12 +455,13 @@ int qlcnic_enable_msix(struct qlcnic_adapter *adapter, u32 num_msix)
 
 			if (num_msix) {
 				dev_info(&pdev->dev,
-					 "Trying %d MSI-X interrupt vectors\n",
+					 "Trying to allocate %d MSI-X interrupt vectors\n",
 					 num_msix);
 				goto enable_msix;
 			}
 		} else {
-			dev_info(&pdev->dev, "Failed to get %d vectors\n",
+			dev_info(&pdev->dev,
+				 "Unable to allocate %d MSI-X interrupt vectors\n",
 				 num_msix);
 		}
 	}
@@ -1176,8 +1175,6 @@ qlcnic_set_mgmt_operations(struct qlcnic_adapter *adapter)
 
 	qlcnic_dev_set_npar_ready(adapter);
 
-	if (qlcnic_83xx_check(adapter))
-		qlcnic_83xx_register_nic_idc_func(adapter, 1);
 	return err;
 }
 
@@ -1507,10 +1504,7 @@ void qlcnic_diag_free_res(struct net_device *netdev, int max_sds_rings)
 	if (adapter->ahw->diag_test == QLCNIC_INTERRUPT_TEST) {
 		for (ring = 0; ring < adapter->max_sds_rings; ring++) {
 			sds_ring = &adapter->recv_ctx->sds_rings[ring];
-			if (qlcnic_83xx_check(adapter))
-				writel(1, sds_ring->crb_intr_mask);
-			else
-				qlcnic_disable_int(sds_ring);
+			qlcnic_disable_int(sds_ring);
 		}
 	}
 
@@ -1536,8 +1530,6 @@ static int qlcnic_alloc_adapter_resources(struct qlcnic_adapter *adapter)
 	adapter->recv_ctx = kzalloc(sizeof(struct qlcnic_recv_context),
 				GFP_KERNEL);
 	if (!adapter->recv_ctx) {
-		dev_err(&adapter->pdev->dev,
-			"Failed to allocate recv ctx resources for adapter\n");
 		err = -ENOMEM;
 		goto err_out;
 	}
@@ -1605,10 +1597,7 @@ int qlcnic_diag_alloc_res(struct net_device *netdev, int test)
 	if (adapter->ahw->diag_test == QLCNIC_INTERRUPT_TEST) {
 		for (ring = 0; ring < adapter->max_sds_rings; ring++) {
 			sds_ring = &adapter->recv_ctx->sds_rings[ring];
-			if (qlcnic_82xx_check(adapter))
-				qlcnic_enable_int(sds_ring);
-			else
-				qlcnic_83xx_enable_intr(adapter, sds_ring);
+			qlcnic_enable_int(sds_ring);
 		}
 	}
 
@@ -1764,16 +1753,15 @@ void qlcnic_free_tx_rings(struct qlcnic_adapter *adapter)
 int qlcnic_alloc_tx_rings(struct qlcnic_adapter *adapter,
 			  struct net_device *netdev)
 {
-	int ring, size, vector, index;
+	int ring, vector, index;
 	struct qlcnic_host_tx_ring *tx_ring;
 	struct qlcnic_cmd_buffer *cmd_buf_arr;
 
-	size = adapter->max_drv_tx_rings * sizeof(struct qlcnic_host_tx_ring);
-	tx_ring = kzalloc(size, GFP_KERNEL);
-	if (tx_ring == NULL) {
-		dev_err(&netdev->dev, "failed to allocate tx rings\n");
+	tx_ring = kcalloc(adapter->max_drv_tx_rings,
+			  sizeof(struct qlcnic_host_tx_ring), GFP_KERNEL);
+	if (tx_ring == NULL)
 		return -ENOMEM;
-	}
+
 	adapter->tx_ring = tx_ring;
 
 	for (ring = 0; ring < adapter->max_drv_tx_rings; ring++) {
@@ -1782,8 +1770,6 @@ int qlcnic_alloc_tx_rings(struct qlcnic_adapter *adapter,
 		tx_ring->txq = netdev_get_tx_queue(netdev, ring);
 		cmd_buf_arr = vzalloc(TX_BUFF_RINGSIZE(tx_ring));
 		if (cmd_buf_arr == NULL) {
-			dev_err(&netdev->dev,
-				"failed to allocate cmd buffer ring\n");
 			qlcnic_free_tx_rings(adapter);
 			return -ENOMEM;
 		}
@@ -1813,7 +1799,7 @@ qlcnic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct qlcnic_hardware_context *ahw;
 	int err, pci_using_dac = -1;
 	u32 capab2;
-	char board_name[QLCNIC_MAX_BOARD_NAME_LEN];
+	char board_name[QLCNIC_MAX_BOARD_NAME_LEN + 19]; /* MAC + ": " + name */
 
 	err = pci_enable_device(pdev);
 	if (err)
@@ -2032,6 +2018,8 @@ static void qlcnic_remove(struct pci_dev *pdev)
 		if (adapter->flags & QLCNIC_MSIX_ENABLED)
 			qlcnic_83xx_config_intrpt(adapter, 0);
 		qlcnic_83xx_free_mbx_intr(adapter);
+		qlcnic_83xx_register_nic_idc_func(adapter, 0);
+		cancel_delayed_work_sync(&adapter->idc_aen_work);
 	}
 
 	qlcnic_detach(adapter);
@@ -2189,10 +2177,6 @@ static int qlcnic_close(struct net_device *netdev)
 	struct qlcnic_adapter *adapter = netdev_priv(netdev);
 
 	__qlcnic_down(adapter, netdev);
-	if (qlcnic_83xx_check(adapter)) {
-		qlcnic_83xx_register_nic_idc_func(adapter, 0);
-		cancel_delayed_work_sync(&adapter->idc_aen_work);
-	}
 
 	return 0;
 }
@@ -3070,6 +3054,8 @@ static int qlcnic_attach_func(struct pci_dev *pdev)
 	}
 
 	if (qlcnic_83xx_check(adapter)) {
+		/* register for NIC IDC AEN Events */
+		qlcnic_83xx_register_nic_idc_func(adapter, 1);
 		err = qlcnic_83xx_setup_mbx_intr(adapter);
 		if (err) {
 			dev_err(&adapter->pdev->dev,
@@ -3124,6 +3110,8 @@ static pci_ers_result_t qlcnic_io_error_detected(struct pci_dev *pdev,
 		if (adapter->flags & QLCNIC_MSIX_ENABLED)
 			qlcnic_83xx_config_intrpt(adapter, 0);
 		qlcnic_83xx_free_mbx_intr(adapter);
+		qlcnic_83xx_register_nic_idc_func(adapter, 0);
+		cancel_delayed_work_sync(&adapter->idc_aen_work);
 	}
 
 	qlcnic_detach(adapter);
@@ -3215,7 +3203,7 @@ int qlcnic_set_max_rss(struct qlcnic_adapter *adapter, u8 data, size_t len)
 	if (netif_running(netdev))
 		__qlcnic_down(adapter, netdev);
 
-	if (qlcnic_82xx_check(adapter)) {
+	if (qlcnic_83xx_check(adapter)) {
 		if (adapter->flags & QLCNIC_MSIX_ENABLED)
 			qlcnic_83xx_config_intrpt(adapter, 0);
 		qlcnic_83xx_free_mbx_intr(adapter);
@@ -3231,6 +3219,8 @@ int qlcnic_set_max_rss(struct qlcnic_adapter *adapter, u8 data, size_t len)
 	}
 
 	if (qlcnic_83xx_check(adapter)) {
+		/* register for NIC IDC AEN Events */
+		qlcnic_83xx_register_nic_idc_func(adapter, 1);
 		err = qlcnic_83xx_setup_mbx_intr(adapter);
 		if (err) {
 			dev_err(&adapter->pdev->dev,
@@ -3395,7 +3385,7 @@ static struct notifier_block qlcnic_inetaddr_cb = {
 void qlcnic_restore_indev_addr(struct net_device *dev, unsigned long event)
 { }
 #endif
-static struct pci_error_handlers qlcnic_err_handler = {
+static const struct pci_error_handlers qlcnic_err_handler = {
 	.error_detected = qlcnic_io_error_detected,
 	.slot_reset = qlcnic_io_slot_reset,
 	.resume = qlcnic_io_resume,
