@@ -61,6 +61,7 @@ static struct srcu_struct netpoll_srcu;
 
 static void zap_completion_queue(void);
 static void netpoll_neigh_reply(struct sk_buff *skb, struct netpoll_info *npinfo);
+static void netpoll_async_cleanup(struct work_struct *work);
 
 static unsigned int carrier_timeout = 4;
 module_param(carrier_timeout, uint, 0644);
@@ -205,22 +206,26 @@ static void netpoll_poll_dev(struct net_device *dev)
 	 * the dev_open/close paths use this to block netpoll activity
 	 * while changing device state
 	 */
-	if (!mutex_trylock(&dev->npinfo->dev_lock))
+	if (!mutex_trylock(&ni->dev_lock))
 		return;
 
-	if (!dev || !netif_running(dev))
+	if (!netif_running(dev)) {
+		mutex_unlock(&ni->dev_lock);
 		return;
+	}
 
 	ops = dev->netdev_ops;
-	if (!ops->ndo_poll_controller)
+	if (!ops->ndo_poll_controller) {
+		mutex_unlock(&ni->dev_lock);
 		return;
+	}
 
 	/* Process pending work on NIC */
 	ops->ndo_poll_controller(dev);
 
 	poll_napi(dev);
 
-	mutex_unlock(&dev->npinfo->dev_lock);
+	mutex_unlock(&ni->dev_lock);
 
 	if (dev->flags & IFF_SLAVE) {
 		if (ni) {
@@ -702,7 +707,7 @@ static void netpoll_neigh_reply(struct sk_buff *skb, struct netpoll_info *npinfo
 			icmp6h->icmp6_type = NDISC_NEIGHBOUR_ADVERTISEMENT;
 			icmp6h->icmp6_router = 0;
 			icmp6h->icmp6_solicited = 1;
-			target = (struct in6_addr *)skb_transport_header(send_skb) + sizeof(struct icmp6hdr);
+			target = (struct in6_addr *)(skb_transport_header(send_skb) + sizeof(struct icmp6hdr));
 			*target = msg->target;
 			icmp6h->icmp6_cksum = csum_ipv6_magic(saddr, daddr, size,
 							      IPPROTO_ICMPV6,
@@ -1020,6 +1025,7 @@ int __netpoll_setup(struct netpoll *np, struct net_device *ndev, gfp_t gfp)
 
 	np->dev = ndev;
 	strlcpy(np->dev_name, ndev->name, IFNAMSIZ);
+	INIT_WORK(&np->cleanup_work, netpoll_async_cleanup);
 
 	if ((ndev->priv_flags & IFF_DISABLE_NETPOLL) ||
 	    !ndev->netdev_ops->ndo_poll_controller) {
@@ -1054,7 +1060,7 @@ int __netpoll_setup(struct netpoll *np, struct net_device *ndev, gfp_t gfp)
 				goto free_npinfo;
 		}
 	} else {
-		npinfo = ndev->npinfo;
+		npinfo = rtnl_dereference(ndev->npinfo);
 		atomic_inc(&npinfo->refcnt);
 	}
 
@@ -1234,7 +1240,11 @@ void __netpoll_cleanup(struct netpoll *np)
 	struct netpoll_info *npinfo;
 	unsigned long flags;
 
-	npinfo = np->dev->npinfo;
+	/* rtnl_dereference would be preferable here but
+	 * rcu_cleanup_netpoll path can put us in here safely without
+	 * holding the rtnl, so plain rcu_dereference it is
+	 */
+	npinfo = rtnl_dereference(np->dev->npinfo);
 	if (!npinfo)
 		return;
 
@@ -1255,25 +1265,27 @@ void __netpoll_cleanup(struct netpoll *np)
 		if (ops->ndo_netpoll_cleanup)
 			ops->ndo_netpoll_cleanup(np->dev);
 
-		RCU_INIT_POINTER(np->dev->npinfo, NULL);
+		rcu_assign_pointer(np->dev->npinfo, NULL);
 		call_rcu_bh(&npinfo->rcu, rcu_cleanup_netpoll_info);
 	}
 }
 EXPORT_SYMBOL_GPL(__netpoll_cleanup);
 
-static void rcu_cleanup_netpoll(struct rcu_head *rcu_head)
+static void netpoll_async_cleanup(struct work_struct *work)
 {
-	struct netpoll *np = container_of(rcu_head, struct netpoll, rcu);
+	struct netpoll *np = container_of(work, struct netpoll, cleanup_work);
 
+	rtnl_lock();
 	__netpoll_cleanup(np);
+	rtnl_unlock();
 	kfree(np);
 }
 
-void __netpoll_free_rcu(struct netpoll *np)
+void __netpoll_free_async(struct netpoll *np)
 {
-	call_rcu_bh(&np->rcu, rcu_cleanup_netpoll);
+	schedule_work(&np->cleanup_work);
 }
-EXPORT_SYMBOL_GPL(__netpoll_free_rcu);
+EXPORT_SYMBOL_GPL(__netpoll_free_async);
 
 void netpoll_cleanup(struct netpoll *np)
 {

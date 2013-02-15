@@ -535,7 +535,7 @@ static void bgmac_dma_init(struct bgmac *bgmac)
  * PHY ops
  **************************************************/
 
-u16 bgmac_phy_read(struct bgmac *bgmac, u8 phyaddr, u8 reg)
+static u16 bgmac_phy_read(struct bgmac *bgmac, u8 phyaddr, u8 reg)
 {
 	struct bcma_device *core;
 	u16 phy_access_addr;
@@ -584,7 +584,7 @@ u16 bgmac_phy_read(struct bgmac *bgmac, u8 phyaddr, u8 reg)
 }
 
 /* http://bcm-v4.sipsolutions.net/mac-gbit/gmac/chipphywr */
-void bgmac_phy_write(struct bgmac *bgmac, u8 phyaddr, u8 reg, u16 value)
+static int bgmac_phy_write(struct bgmac *bgmac, u8 phyaddr, u8 reg, u16 value)
 {
 	struct bcma_device *core;
 	u16 phy_access_addr;
@@ -617,9 +617,13 @@ void bgmac_phy_write(struct bgmac *bgmac, u8 phyaddr, u8 reg, u16 value)
 	tmp |= value;
 	bcma_write32(core, phy_access_addr, tmp);
 
-	if (!bgmac_wait_value(core, phy_access_addr, BGMAC_PA_START, 0, 1000))
+	if (!bgmac_wait_value(core, phy_access_addr, BGMAC_PA_START, 0, 1000)) {
 		bgmac_err(bgmac, "Writing to PHY %d register 0x%X failed\n",
 			  phyaddr, reg);
+		return -ETIMEDOUT;
+	}
+
+	return 0;
 }
 
 /* http://bcm-v4.sipsolutions.net/mac-gbit/gmac/chipphyforce */
@@ -970,6 +974,7 @@ static void bgmac_chip_intrs_on(struct bgmac *bgmac)
 static void bgmac_chip_intrs_off(struct bgmac *bgmac)
 {
 	bgmac_write(bgmac, BGMAC_INT_MASK, 0);
+	bgmac_read(bgmac, BGMAC_INT_MASK);
 }
 
 /* http://bcm-v4.sipsolutions.net/mac-gbit/gmac/gmac_enable */

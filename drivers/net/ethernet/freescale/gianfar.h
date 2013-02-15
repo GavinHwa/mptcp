@@ -627,33 +627,28 @@ struct rmon_mib
 };
 
 struct gfar_extra_stats {
-	u64 kernel_dropped;
-	u64 rx_large;
-	u64 rx_short;
-	u64 rx_nonoctet;
-	u64 rx_crcerr;
-	u64 rx_overrun;
-	u64 rx_bsy;
-	u64 rx_babr;
-	u64 rx_trunc;
-	u64 eberr;
-	u64 tx_babt;
-	u64 tx_underrun;
-	u64 rx_skbmissing;
-	u64 tx_timeout;
+	atomic64_t kernel_dropped;
+	atomic64_t rx_large;
+	atomic64_t rx_short;
+	atomic64_t rx_nonoctet;
+	atomic64_t rx_crcerr;
+	atomic64_t rx_overrun;
+	atomic64_t rx_bsy;
+	atomic64_t rx_babr;
+	atomic64_t rx_trunc;
+	atomic64_t eberr;
+	atomic64_t tx_babt;
+	atomic64_t tx_underrun;
+	atomic64_t rx_skbmissing;
+	atomic64_t tx_timeout;
 };
 
 #define GFAR_RMON_LEN ((sizeof(struct rmon_mib) - 16)/sizeof(u32))
-#define GFAR_EXTRA_STATS_LEN (sizeof(struct gfar_extra_stats)/sizeof(u64))
+#define GFAR_EXTRA_STATS_LEN \
+	(sizeof(struct gfar_extra_stats)/sizeof(atomic64_t))
 
-/* Number of stats in the stats structure (ignore car and cam regs)*/
+/* Number of stats exported via ethtool */
 #define GFAR_STATS_LEN (GFAR_RMON_LEN + GFAR_EXTRA_STATS_LEN)
-
-struct gfar_stats {
-	u64 extra[GFAR_EXTRA_STATS_LEN];
-	u64 rmon[GFAR_RMON_LEN];
-};
-
 
 struct gfar {
 	u32	tsec_id;	/* 0x.000 - Controller ID register */
@@ -1054,28 +1049,65 @@ enum gfar_errata {
  * the buffer descriptor determines the actual condition.
  */
 struct gfar_private {
-
-	/* Indicates how many tx, rx queues are enabled */
-	unsigned int num_tx_queues;
 	unsigned int num_rx_queues;
-	unsigned int num_grps;
+
+	struct device *dev;
+	struct net_device *ndev;
+	enum gfar_errata errata;
+	unsigned int rx_buffer_size;
+
+	u16 uses_rxfcb;
+	u16 padding;
+
+	/* HW time stamping enabled flag */
+	int hwts_rx_en;
+	int hwts_tx_en;
+
+	struct gfar_priv_tx_q *tx_queue[MAX_TX_QS];
+	struct gfar_priv_rx_q *rx_queue[MAX_RX_QS];
+	struct gfar_priv_grp gfargrp[MAXGROUPS];
+
+	u32 device_flags;
+
 	unsigned int mode;
+	unsigned int num_tx_queues;
+	unsigned int num_grps;
+
+	/* Network Statistics */
+	struct gfar_extra_stats extra_stats;
+
+	/* PHY stuff */
+	phy_interface_t interface;
+	struct device_node *phy_node;
+	struct device_node *tbi_node;
+	struct phy_device *phydev;
+	struct mii_bus *mii_bus;
+	int oldspeed;
+	int oldduplex;
+	int oldlink;
+
+	/* Bitfield update lock */
+	spinlock_t bflock;
+
+	uint32_t msg_enable;
+
+	struct work_struct reset_task;
+
+	struct platform_device *ofdev;
+	unsigned char
+		extended_hash:1,
+		bd_stash_en:1,
+		rx_filer_enable:1,
+		/* Wake-on-LAN enabled */
+		wol_en:1,
+		/* Enable priorty based Tx scheduling in Hw */
+		prio_sched_en:1;
 
 	/* The total tx and rx ring size for the enabled queues */
 	unsigned int total_tx_ring_size;
 	unsigned int total_rx_ring_size;
 
-	struct device_node *node;
-	struct net_device *ndev;
-	struct platform_device *ofdev;
-	enum gfar_errata errata;
-
-	struct gfar_priv_grp gfargrp[MAXGROUPS];
-	struct gfar_priv_tx_q *tx_queue[MAX_TX_QS];
-	struct gfar_priv_rx_q *rx_queue[MAX_RX_QS];
-
 	/* RX per device parameters */
-	unsigned int rx_buffer_size;
 	unsigned int rx_stash_size;
 	unsigned int rx_stash_index;
 
@@ -1093,39 +1125,6 @@ struct gfar_private {
 	unsigned int fifo_threshold;
 	unsigned int fifo_starve;
 	unsigned int fifo_starve_off;
-
-	/* Bitfield update lock */
-	spinlock_t bflock;
-
-	phy_interface_t interface;
-	struct device_node *phy_node;
-	struct device_node *tbi_node;
-	u32 device_flags;
-	unsigned char
-		extended_hash:1,
-		bd_stash_en:1,
-		rx_filer_enable:1,
-		wol_en:1, /* Wake-on-LAN enabled */
-		prio_sched_en:1; /* Enable priorty based Tx scheduling in Hw */
-	unsigned short padding;
-
-	/* PHY stuff */
-	struct phy_device *phydev;
-	struct mii_bus *mii_bus;
-	int oldspeed;
-	int oldduplex;
-	int oldlink;
-
-	uint32_t msg_enable;
-
-	struct work_struct reset_task;
-
-	/* Network Statistics */
-	struct gfar_extra_stats extra_stats;
-
-	/* HW time stamping enabled flag */
-	int hwts_rx_en;
-	int hwts_tx_en;
 
 	/*Filer table*/
 	unsigned int ftp_rqfpr[MAX_FILER_IDX + 1];

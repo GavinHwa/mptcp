@@ -1233,13 +1233,13 @@ static bool tcp_shifted_skb(struct sock *sk, struct sk_buff *skb,
 	 */
 	if (!skb_shinfo(prev)->gso_size) {
 		skb_shinfo(prev)->gso_size = mss;
-		skb_shinfo(prev)->gso_type |= sk->sk_gso_type;
+		skb_shinfo(prev)->gso_type = sk->sk_gso_type;
 	}
 
 	/* CHECKME: To clear or not to clear? Mimics normal skb currently */
 	if (skb_shinfo(skb)->gso_segs <= 1) {
 		skb_shinfo(skb)->gso_size = 0;
-		skb_shinfo(skb)->gso_type &= SKB_GSO_SHARED_FRAG;
+		skb_shinfo(skb)->gso_type = 0;
 	}
 
 	/* Difference in this won't matter, both ACKed by the same cumul. ACK */
@@ -3867,7 +3867,7 @@ static bool tcp_parse_aligned_timestamp(struct tcp_sock *tp, const struct tcphdr
 		++ptr;
 		tp->rx_opt.rcv_tsval = ntohl(*ptr);
 		++ptr;
-		tp->rx_opt.rcv_tsecr = ntohl(*ptr);
+		tp->rx_opt.rcv_tsecr = ntohl(*ptr) - tp->tsoffset;
 		return true;
 	}
 	return false;
@@ -3893,6 +3893,8 @@ static bool tcp_fast_parse_options(const struct sk_buff *skb,
 	}
 	tcp_parse_options(skb, &tp->rx_opt, hvpp,
 			    tp->mpc ? &tp->mptcp->rx_opt : NULL, 1, NULL);
+	if (tp->rx_opt.saw_tstamp)
+		tp->rx_opt.rcv_tsecr -= tp->tsoffset;
 
 	return true;
 }
@@ -5794,6 +5796,8 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 
 	tcp_parse_options(skb, &tp->rx_opt, &hash_location,
 			  mpcb ? &tp->mptcp->rx_opt : &mopt, 0, &foc);
+	if (tp->rx_opt.saw_tstamp)
+		tp->rx_opt.rcv_tsecr -= tp->tsoffset;
 
 	if (th->ack) {
 		/* rfc793:
