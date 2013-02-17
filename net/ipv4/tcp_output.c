@@ -1377,7 +1377,7 @@ int tcp_trim_head(struct sock *sk, struct sk_buff *skb, u32 len)
 	if (tcp_sk(sk)->mpc && !is_meta_sk(sk))
 		return mptcp_trim_head(sk, skb, len);
 
-	if (skb_cloned(skb) && pskb_expand_head(skb, 0, 0, GFP_ATOMIC))
+	if (skb_unclone(skb, GFP_ATOMIC))
 		return -ENOMEM;
 
 	__pskb_trim_head(skb, len);
