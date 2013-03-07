@@ -162,13 +162,9 @@ int mwifiex_fill_new_bss_desc(struct mwifiex_private *priv,
 
 	rcu_read_lock();
 	ies = rcu_dereference(bss->ies);
-	if (WARN_ON(!ies)) {
-		/* should never happen */
-		rcu_read_unlock();
-		return -EINVAL;
-	}
 	beacon_ie = kmemdup(ies->data, ies->len, GFP_ATOMIC);
 	beacon_ie_len = ies->len;
+	bss_desc->timestamp = ies->tsf;
 	rcu_read_unlock();
 
 	if (!beacon_ie) {
@@ -184,7 +180,6 @@ int mwifiex_fill_new_bss_desc(struct mwifiex_private *priv,
 	bss_desc->cap_info_bitmap = bss->capability;
 	bss_desc->bss_band = bss_priv->band;
 	bss_desc->fw_tsf = bss_priv->fw_tsf;
-	bss_desc->timestamp = bss->tsf;
 	if (bss_desc->cap_info_bitmap & WLAN_CAPABILITY_PRIVACY) {
 		dev_dbg(priv->adapter->dev, "info: InterpretIE: AP WEP enabled\n");
 		bss_desc->privacy = MWIFIEX_802_11_PRIV_FILTER_8021X_WEP;
@@ -286,9 +281,10 @@ int mwifiex_bss_start(struct mwifiex_private *priv, struct cfg80211_bss *bss,
 
 			if (mwifiex_band_to_radio_type((u8) bss_desc->bss_band)
 			    == HostCmd_SCAN_RADIO_TYPE_BG)
-				config_bands = BAND_B | BAND_G | BAND_GN;
+				config_bands = BAND_B | BAND_G | BAND_GN |
+					       BAND_GAC;
 			else
-				config_bands = BAND_A | BAND_AN;
+				config_bands = BAND_A | BAND_AN | BAND_AAC;
 
 			if (!((config_bands | adapter->fw_bands) &
 			      ~adapter->fw_bands))
@@ -322,7 +318,7 @@ int mwifiex_bss_start(struct mwifiex_private *priv, struct cfg80211_bss *bss,
 		}
 
 		if (bss)
-			cfg80211_put_bss(bss);
+			cfg80211_put_bss(priv->adapter->wiphy, bss);
 	} else {
 		/* Adhoc mode */
 		/* If the requested SSID matches current SSID, return */
@@ -352,7 +348,7 @@ int mwifiex_bss_start(struct mwifiex_private *priv, struct cfg80211_bss *bss,
 							" list. Joining...\n");
 			ret = mwifiex_adhoc_join(priv, bss_desc);
 			if (bss)
-				cfg80211_put_bss(bss);
+				cfg80211_put_bss(priv->adapter->wiphy, bss);
 		} else {
 			dev_dbg(adapter->dev, "info: Network not found in "
 				"the list, creating adhoc with ssid = %s\n",

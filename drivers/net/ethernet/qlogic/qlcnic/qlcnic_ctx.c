@@ -126,6 +126,7 @@ int qlcnic_82xx_issue_cmd(struct qlcnic_adapter *adapter,
 	u32 signature;
 	struct pci_dev *pdev = adapter->pdev;
 	struct qlcnic_hardware_context *ahw = adapter->ahw;
+	const char *fmt;
 
 	signature = qlcnic_get_cmd_signature(ahw);
 
@@ -147,8 +148,28 @@ int qlcnic_82xx_issue_cmd(struct qlcnic_adapter *adapter,
 		cmd->rsp.arg[0] = QLCNIC_RCODE_TIMEOUT;
 	} else if (rsp == QLCNIC_CDRP_RSP_FAIL) {
 		cmd->rsp.arg[0] = QLCRD32(adapter, QLCNIC_CDRP_ARG(1));
-		dev_err(&pdev->dev, "failed card response code:0x%x\n",
-			cmd->rsp.arg[0]);
+		switch (cmd->rsp.arg[0]) {
+		case QLCNIC_RCODE_INVALID_ARGS:
+			fmt = "CDRP invalid args: [%d]\n";
+			break;
+		case QLCNIC_RCODE_NOT_SUPPORTED:
+		case QLCNIC_RCODE_NOT_IMPL:
+			fmt = "CDRP command not supported: [%d]\n";
+			break;
+		case QLCNIC_RCODE_NOT_PERMITTED:
+			fmt = "CDRP requested action not permitted: [%d]\n";
+			break;
+		case QLCNIC_RCODE_INVALID:
+			fmt = "CDRP invalid or unknown cmd received: [%d]\n";
+			break;
+		case QLCNIC_RCODE_TIMEOUT:
+			fmt = "CDRP command timeout: [%d]\n";
+			break;
+		default:
+			fmt = "CDRP command failed: [%d]\n";
+			break;
+		}
+		dev_err(&pdev->dev, fmt, cmd->rsp.arg[0]);
 	} else if (rsp == QLCNIC_CDRP_RSP_OK)
 		cmd->rsp.arg[0] = QLCNIC_RCODE_SUCCESS;
 
@@ -578,9 +599,17 @@ int qlcnic_fw_create_ctx(struct qlcnic_adapter *dev)
 		dev->flags &= ~QLCNIC_NEED_FLR;
 	}
 
+	if (qlcnic_83xx_check(dev) && (dev->flags & QLCNIC_MSIX_ENABLED)) {
+		if (dev->ahw->diag_test != QLCNIC_LOOPBACK_TEST) {
+			err = qlcnic_83xx_config_intrpt(dev, 1);
+			if (err)
+				return err;
+		}
+	}
+
 	err = qlcnic_fw_cmd_create_rx_ctx(dev);
 	if (err)
-		return err;
+		goto err_out;
 
 	for (ring = 0; ring < dev->max_drv_tx_rings; ring++) {
 		err = qlcnic_fw_cmd_create_tx_ctx(dev,
@@ -589,18 +618,25 @@ int qlcnic_fw_create_ctx(struct qlcnic_adapter *dev)
 		if (err) {
 			qlcnic_fw_cmd_destroy_rx_ctx(dev);
 			if (ring == 0)
-				return err;
+				goto err_out;
 
 			for (i = 0; i < ring; i++)
 				qlcnic_fw_cmd_destroy_tx_ctx(dev,
 							     &dev->tx_ring[i]);
 
-			return err;
+			goto err_out;
 		}
 	}
 
 	set_bit(__QLCNIC_FW_ATTACHED, &dev->state);
 	return 0;
+
+err_out:
+	if (qlcnic_83xx_check(dev) && (dev->flags & QLCNIC_MSIX_ENABLED)) {
+		if (dev->ahw->diag_test != QLCNIC_LOOPBACK_TEST)
+			qlcnic_83xx_config_intrpt(dev, 0);
+	}
+	return err;
 }
 
 void qlcnic_fw_destroy_ctx(struct qlcnic_adapter *adapter)
@@ -612,6 +648,12 @@ void qlcnic_fw_destroy_ctx(struct qlcnic_adapter *adapter)
 		for (ring = 0; ring < adapter->max_drv_tx_rings; ring++)
 			qlcnic_fw_cmd_destroy_tx_ctx(adapter,
 						     &adapter->tx_ring[ring]);
+
+		if (qlcnic_83xx_check(adapter) &&
+		    (adapter->flags & QLCNIC_MSIX_ENABLED)) {
+			if (adapter->ahw->diag_test != QLCNIC_LOOPBACK_TEST)
+				qlcnic_83xx_config_intrpt(adapter, 0);
+		}
 		/* Allow dma queues to drain after context reset */
 		mdelay(20);
 	}

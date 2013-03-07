@@ -2703,16 +2703,16 @@ static int __net_init ipmr_net_init(struct net *net)
 
 #ifdef CONFIG_PROC_FS
 	err = -ENOMEM;
-	if (!proc_net_fops_create(net, "ip_mr_vif", 0, &ipmr_vif_fops))
+	if (!proc_create("ip_mr_vif", 0, net->proc_net, &ipmr_vif_fops))
 		goto proc_vif_fail;
-	if (!proc_net_fops_create(net, "ip_mr_cache", 0, &ipmr_mfc_fops))
+	if (!proc_create("ip_mr_cache", 0, net->proc_net, &ipmr_mfc_fops))
 		goto proc_cache_fail;
 #endif
 	return 0;
 
 #ifdef CONFIG_PROC_FS
 proc_cache_fail:
-	proc_net_remove(net, "ip_mr_vif");
+	remove_proc_entry("ip_mr_vif", net->proc_net);
 proc_vif_fail:
 	ipmr_rules_exit(net);
 #endif
@@ -2723,8 +2723,8 @@ fail:
 static void __net_exit ipmr_net_exit(struct net *net)
 {
 #ifdef CONFIG_PROC_FS
-	proc_net_remove(net, "ip_mr_cache");
-	proc_net_remove(net, "ip_mr_vif");
+	remove_proc_entry("ip_mr_cache", net->proc_net);
+	remove_proc_entry("ip_mr_vif", net->proc_net);
 #endif
 	ipmr_rules_exit(net);
 }

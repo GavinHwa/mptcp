@@ -509,7 +509,7 @@ static const struct file_operations ac6_seq_fops = {
 
 int __net_init ac6_proc_init(struct net *net)
 {
-	if (!proc_net_fops_create(net, "anycast6", S_IRUGO, &ac6_seq_fops))
+	if (!proc_create("anycast6", S_IRUGO, net->proc_net, &ac6_seq_fops))
 		return -ENOMEM;
 
 	return 0;
@@ -517,7 +517,7 @@ int __net_init ac6_proc_init(struct net *net)
 
 void ac6_proc_exit(struct net *net)
 {
-	proc_net_remove(net, "anycast6");
+	remove_proc_entry("anycast6", net->proc_net);
 }
 #endif
 

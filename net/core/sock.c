@@ -186,8 +186,10 @@ void mem_cgroup_sockets_destroy(struct mem_cgroup *memcg)
 static struct lock_class_key af_family_keys[AF_MAX];
 static struct lock_class_key af_family_slock_keys[AF_MAX];
 
+#if defined(CONFIG_MEMCG_KMEM)
 struct static_key memcg_socket_limit_enabled;
 EXPORT_SYMBOL(memcg_socket_limit_enabled);
+#endif
 
 /*
  * Make lock validator output more readable. (we pre-construct these
@@ -2836,7 +2838,7 @@ static const struct file_operations proto_seq_fops = {
 
 static __net_init int proto_init_net(struct net *net)
 {
-	if (!proc_net_fops_create(net, "protocols", S_IRUGO, &proto_seq_fops))
+	if (!proc_create("protocols", S_IRUGO, net->proc_net, &proto_seq_fops))
 		return -ENOMEM;
 
 	return 0;
@@ -2844,7 +2846,7 @@ static __net_init int proto_init_net(struct net *net)
 
 static __net_exit void proto_exit_net(struct net *net)
 {
-	proc_net_remove(net, "protocols");
+	remove_proc_entry("protocols", net->proc_net);
 }
 
 

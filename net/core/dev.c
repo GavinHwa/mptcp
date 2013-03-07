@@ -97,8 +97,6 @@
 #include <net/net_namespace.h>
 #include <net/sock.h>
 #include <linux/rtnetlink.h>
-#include <linux/proc_fs.h>
-#include <linux/seq_file.h>
 #include <linux/stat.h>
 #include <net/dst.h>
 #include <net/pkt_sched.h>
@@ -106,12 +104,10 @@
 #include <net/xfrm.h>
 #include <linux/highmem.h>
 #include <linux/init.h>
-#include <linux/kmod.h>
 #include <linux/module.h>
 #include <linux/netpoll.h>
 #include <linux/rcupdate.h>
 #include <linux/delay.h>
-#include <net/wext.h>
 #include <net/iw_handler.h>
 #include <asm/current.h>
 #include <linux/audit.h>
@@ -132,7 +128,6 @@
 #include <linux/pci.h>
 #include <linux/inetdevice.h>
 #include <linux/cpu_rmap.h>
-#include <linux/net_tstamp.h>
 #include <linux/static_key.h>
 
 #include "net-sysfs.h"
@@ -143,41 +138,10 @@
 /* This should be increased if a protocol with a bigger head is added. */
 #define GRO_MAX_HEAD (MAX_HEADER + 128)
 
-/*
- *	The list of packet types we will receive (as opposed to discard)
- *	and the routines to invoke.
- *
- *	Why 16. Because with 16 the only overlap we get on a hash of the
- *	low nibble of the protocol value is RARP/SNAP/X.25.
- *
- *      NOTE:  That is no longer true with the addition of VLAN tags.  Not
- *             sure which should go first, but I bet it won't make much
- *             difference if we are running VLANs.  The good news is that
- *             this protocol won't be in the list unless compiled in, so
- *             the average user (w/out VLANs) will not be adversely affected.
- *             --BLG
- *
- *		0800	IP
- *		8100    802.1Q VLAN
- *		0001	802.3
- *		0002	AX.25
- *		0004	802.2
- *		8035	RARP
- *		0005	SNAP
- *		0805	X.25
- *		0806	ARP
- *		8137	IPX
- *		0009	Localtalk
- *		86DD	IPv6
- */
-
-#define PTYPE_HASH_SIZE	(16)
-#define PTYPE_HASH_MASK	(PTYPE_HASH_SIZE - 1)
-
 static DEFINE_SPINLOCK(ptype_lock);
 static DEFINE_SPINLOCK(offload_lock);
-static struct list_head ptype_base[PTYPE_HASH_SIZE] __read_mostly;
-static struct list_head ptype_all __read_mostly;	/* Taps */
+struct list_head ptype_base[PTYPE_HASH_SIZE] __read_mostly;
+struct list_head ptype_all __read_mostly;	/* Taps */
 static struct list_head offload_base __read_mostly;
 
 /*
@@ -694,11 +658,10 @@ __setup("netdev=", netdev_boot_setup);
 
 struct net_device *__dev_get_by_name(struct net *net, const char *name)
 {
-	struct hlist_node *p;
 	struct net_device *dev;
 	struct hlist_head *head = dev_name_hash(net, name);
 
-	hlist_for_each_entry(dev, p, head, name_hlist)
+	hlist_for_each_entry(dev, head, name_hlist)
 		if (!strncmp(dev->name, name, IFNAMSIZ))
 			return dev;
 
@@ -720,11 +683,10 @@ EXPORT_SYMBOL(__dev_get_by_name);
 
 struct net_device *dev_get_by_name_rcu(struct net *net, const char *name)
 {
-	struct hlist_node *p;
 	struct net_device *dev;
 	struct hlist_head *head = dev_name_hash(net, name);
 
-	hlist_for_each_entry_rcu(dev, p, head, name_hlist)
+	hlist_for_each_entry_rcu(dev, head, name_hlist)
 		if (!strncmp(dev->name, name, IFNAMSIZ))
 			return dev;
 
@@ -771,11 +733,10 @@ EXPORT_SYMBOL(dev_get_by_name);
 
 struct net_device *__dev_get_by_index(struct net *net, int ifindex)
 {
-	struct hlist_node *p;
 	struct net_device *dev;
 	struct hlist_head *head = dev_index_hash(net, ifindex);
 
-	hlist_for_each_entry(dev, p, head, index_hlist)
+	hlist_for_each_entry(dev, head, index_hlist)
 		if (dev->ifindex == ifindex)
 			return dev;
 
@@ -796,11 +757,10 @@ EXPORT_SYMBOL(__dev_get_by_index);
 
 struct net_device *dev_get_by_index_rcu(struct net *net, int ifindex)
 {
-	struct hlist_node *p;
 	struct net_device *dev;
 	struct hlist_head *head = dev_index_hash(net, ifindex);
 
-	hlist_for_each_entry_rcu(dev, p, head, index_hlist)
+	hlist_for_each_entry_rcu(dev, head, index_hlist)
 		if (dev->ifindex == ifindex)
 			return dev;
 
@@ -1226,36 +1186,6 @@ void netdev_notify_peers(struct net_device *dev)
 }
 EXPORT_SYMBOL(netdev_notify_peers);
 
-/**
- *	dev_load 	- load a network module
- *	@net: the applicable net namespace
- *	@name: name of interface
- *
- *	If a network interface is not present and the process has suitable
- *	privileges this function loads the module. If module loading is not
- *	available in this kernel then it becomes a nop.
- */
-
-void dev_load(struct net *net, const char *name)
-{
-	struct net_device *dev;
-	int no_module;
-
-	rcu_read_lock();
-	dev = dev_get_by_name_rcu(net, name);
-	rcu_read_unlock();
-
-	no_module = !dev;
-	if (no_module && capable(CAP_NET_ADMIN))
-		no_module = request_module("netdev-%s", name);
-	if (no_module && capable(CAP_SYS_MODULE)) {
-		if (!request_module("%s", name))
-			pr_warn("Loading kernel module for a network device with CAP_SYS_MODULE (deprecated).  Use CAP_NET_ADMIN and alias netdev-%s instead.\n",
-				name);
-	}
-}
-EXPORT_SYMBOL(dev_load);
-
 static int __dev_open(struct net_device *dev)
 {
 	const struct net_device_ops *ops = dev->netdev_ops;
@@ -1645,57 +1575,6 @@ static inline void net_timestamp_set(struct sk_buff *skb)
 			__net_timestamp(SKB);		\
 	}						\
 
-static int net_hwtstamp_validate(struct ifreq *ifr)
-{
-	struct hwtstamp_config cfg;
-	enum hwtstamp_tx_types tx_type;
-	enum hwtstamp_rx_filters rx_filter;
-	int tx_type_valid = 0;
-	int rx_filter_valid = 0;
-
-	if (copy_from_user(&cfg, ifr->ifr_data, sizeof(cfg)))
-		return -EFAULT;
-
-	if (cfg.flags) /* reserved for future extensions */
-		return -EINVAL;
-
-	tx_type = cfg.tx_type;
-	rx_filter = cfg.rx_filter;
-
-	switch (tx_type) {
-	case HWTSTAMP_TX_OFF:
-	case HWTSTAMP_TX_ON:
-	case HWTSTAMP_TX_ONESTEP_SYNC:
-		tx_type_valid = 1;
-		break;
-	}
-
-	switch (rx_filter) {
-	case HWTSTAMP_FILTER_NONE:
-	case HWTSTAMP_FILTER_ALL:
-	case HWTSTAMP_FILTER_SOME:
-	case HWTSTAMP_FILTER_PTP_V1_L4_EVENT:
-	case HWTSTAMP_FILTER_PTP_V1_L4_SYNC:
-	case HWTSTAMP_FILTER_PTP_V1_L4_DELAY_REQ:
-	case HWTSTAMP_FILTER_PTP_V2_L4_EVENT:
-	case HWTSTAMP_FILTER_PTP_V2_L4_SYNC:
-	case HWTSTAMP_FILTER_PTP_V2_L4_DELAY_REQ:
-	case HWTSTAMP_FILTER_PTP_V2_L2_EVENT:
-	case HWTSTAMP_FILTER_PTP_V2_L2_SYNC:
-	case HWTSTAMP_FILTER_PTP_V2_L2_DELAY_REQ:
-	case HWTSTAMP_FILTER_PTP_V2_EVENT:
-	case HWTSTAMP_FILTER_PTP_V2_SYNC:
-	case HWTSTAMP_FILTER_PTP_V2_DELAY_REQ:
-		rx_filter_valid = 1;
-		break;
-	}
-
-	if (!tx_type_valid || !rx_filter_valid)
-		return -ERANGE;
-
-	return 0;
-}
-
 static inline bool is_skb_forwardable(struct net_device *dev,
 				      struct sk_buff *skb)
 {
@@ -1999,8 +1878,10 @@ int netif_set_xps_queue(struct net_device *dev, struct cpumask *mask, u16 index)
 
 		if (!new_dev_maps)
 			new_dev_maps = kzalloc(maps_sz, GFP_KERNEL);
-		if (!new_dev_maps)
+		if (!new_dev_maps) {
+			mutex_unlock(&xps_map_mutex);
 			return -ENOMEM;
+		}
 
 		map = dev_maps ? xmap_dereference(dev_maps->cpu_map[cpu]) :
 				 NULL;
@@ -4176,6 +4057,9 @@ void netif_napi_add(struct net_device *dev, struct napi_struct *napi,
 	napi->gro_list = NULL;
 	napi->skb = NULL;
 	napi->poll = poll;
+	if (weight > NAPI_POLL_WEIGHT)
+		pr_err_once("netif_napi_add() called with weight %d on device %s\n",
+			    weight, dev->name);
 	napi->weight = weight;
 	list_add(&napi->dev_list, &dev->napi_list);
 	napi->dev = dev;
@@ -4299,472 +4183,6 @@ softnet_break:
 	__raise_softirq_irqoff(NET_RX_SOFTIRQ);
 	goto out;
 }
-
-static gifconf_func_t *gifconf_list[NPROTO];
-
-/**
- *	register_gifconf	-	register a SIOCGIF handler
- *	@family: Address family
- *	@gifconf: Function handler
- *
- *	Register protocol dependent address dumping routines. The handler
- *	that is passed must not be freed or reused until it has been replaced
- *	by another handler.
- */
-int register_gifconf(unsigned int family, gifconf_func_t *gifconf)
-{
-	if (family >= NPROTO)
-		return -EINVAL;
-	gifconf_list[family] = gifconf;
-	return 0;
-}
-EXPORT_SYMBOL(register_gifconf);
-
-
-/*
- *	Map an interface index to its name (SIOCGIFNAME)
- */
-
-/*
- *	We need this ioctl for efficient implementation of the
- *	if_indextoname() function required by the IPv6 API.  Without
- *	it, we would have to search all the interfaces to find a
- *	match.  --pb
- */
-
-static int dev_ifname(struct net *net, struct ifreq __user *arg)
-{
-	struct net_device *dev;
-	struct ifreq ifr;
-	unsigned seq;
-
-	/*
-	 *	Fetch the caller's info block.
-	 */
-
-	if (copy_from_user(&ifr, arg, sizeof(struct ifreq)))
-		return -EFAULT;
-
-retry:
-	seq = read_seqcount_begin(&devnet_rename_seq);
-	rcu_read_lock();
-	dev = dev_get_by_index_rcu(net, ifr.ifr_ifindex);
-	if (!dev) {
-		rcu_read_unlock();
-		return -ENODEV;
-	}
-
-	strcpy(ifr.ifr_name, dev->name);
-	rcu_read_unlock();
-	if (read_seqcount_retry(&devnet_rename_seq, seq))
-		goto retry;
-
-	if (copy_to_user(arg, &ifr, sizeof(struct ifreq)))
-		return -EFAULT;
-	return 0;
-}
-
-/*
- *	Perform a SIOCGIFCONF call. This structure will change
- *	size eventually, and there is nothing I can do about it.
- *	Thus we will need a 'compatibility mode'.
- */
-
-static int dev_ifconf(struct net *net, char __user *arg)
-{
-	struct ifconf ifc;
-	struct net_device *dev;
-	char __user *pos;
-	int len;
-	int total;
-	int i;
-
-	/*
-	 *	Fetch the caller's info block.
-	 */
-
-	if (copy_from_user(&ifc, arg, sizeof(struct ifconf)))
-		return -EFAULT;
-
-	pos = ifc.ifc_buf;
-	len = ifc.ifc_len;
-
-	/*
-	 *	Loop over the interfaces, and write an info block for each.
-	 */
-
-	total = 0;
-	for_each_netdev(net, dev) {
-		for (i = 0; i < NPROTO; i++) {
-			if (gifconf_list[i]) {
-				int done;
-				if (!pos)
-					done = gifconf_list[i](dev, NULL, 0);
-				else
-					done = gifconf_list[i](dev, pos + total,
-							       len - total);
-				if (done < 0)
-					return -EFAULT;
-				total += done;
-			}
-		}
-	}
-
-	/*
-	 *	All done.  Write the updated control block back to the caller.
-	 */
-	ifc.ifc_len = total;
-
-	/*
-	 * 	Both BSD and Solaris return 0 here, so we do too.
-	 */
-	return copy_to_user(arg, &ifc, sizeof(struct ifconf)) ? -EFAULT : 0;
-}
-
-#ifdef CONFIG_PROC_FS
-
-#define BUCKET_SPACE (32 - NETDEV_HASHBITS - 1)
-
-#define get_bucket(x) ((x) >> BUCKET_SPACE)
-#define get_offset(x) ((x) & ((1 << BUCKET_SPACE) - 1))
-#define set_bucket_offset(b, o) ((b) << BUCKET_SPACE | (o))
-
-static inline struct net_device *dev_from_same_bucket(struct seq_file *seq, loff_t *pos)
-{
-	struct net *net = seq_file_net(seq);
-	struct net_device *dev;
-	struct hlist_node *p;
-	struct hlist_head *h;
-	unsigned int count = 0, offset = get_offset(*pos);
-
-	h = &net->dev_name_head[get_bucket(*pos)];
-	hlist_for_each_entry_rcu(dev, p, h, name_hlist) {
-		if (++count == offset)
-			return dev;
-	}
-
-	return NULL;
-}
-
-static inline struct net_device *dev_from_bucket(struct seq_file *seq, loff_t *pos)
-{
-	struct net_device *dev;
-	unsigned int bucket;
-
-	do {
-		dev = dev_from_same_bucket(seq, pos);
-		if (dev)
-			return dev;
-
-		bucket = get_bucket(*pos) + 1;
-		*pos = set_bucket_offset(bucket, 1);
-	} while (bucket < NETDEV_HASHENTRIES);
-
-	return NULL;
-}
-
-/*
- *	This is invoked by the /proc filesystem handler to display a device
- *	in detail.
- */
-void *dev_seq_start(struct seq_file *seq, loff_t *pos)
-	__acquires(RCU)
-{
-	rcu_read_lock();
-	if (!*pos)
-		return SEQ_START_TOKEN;
-
-	if (get_bucket(*pos) >= NETDEV_HASHENTRIES)
-		return NULL;
-
-	return dev_from_bucket(seq, pos);
-}
-
-void *dev_seq_next(struct seq_file *seq, void *v, loff_t *pos)
-{
-	++*pos;
-	return dev_from_bucket(seq, pos);
-}
-
-void dev_seq_stop(struct seq_file *seq, void *v)
-	__releases(RCU)
-{
-	rcu_read_unlock();
-}
-
-static void dev_seq_printf_stats(struct seq_file *seq, struct net_device *dev)
-{
-	struct rtnl_link_stats64 temp;
-	const struct rtnl_link_stats64 *stats = dev_get_stats(dev, &temp);
-
-	seq_printf(seq, "%6s: %7llu %7llu %4llu %4llu %4llu %5llu %10llu %9llu "
-		   "%8llu %7llu %4llu %4llu %4llu %5llu %7llu %10llu\n",
-		   dev->name, stats->rx_bytes, stats->rx_packets,
-		   stats->rx_errors,
-		   stats->rx_dropped + stats->rx_missed_errors,
-		   stats->rx_fifo_errors,
-		   stats->rx_length_errors + stats->rx_over_errors +
-		    stats->rx_crc_errors + stats->rx_frame_errors,
-		   stats->rx_compressed, stats->multicast,
-		   stats->tx_bytes, stats->tx_packets,
-		   stats->tx_errors, stats->tx_dropped,
-		   stats->tx_fifo_errors, stats->collisions,
-		   stats->tx_carrier_errors +
-		    stats->tx_aborted_errors +
-		    stats->tx_window_errors +
-		    stats->tx_heartbeat_errors,
-		   stats->tx_compressed);
-}
-
-/*
- *	Called from the PROCfs module. This now uses the new arbitrary sized
- *	/proc/net interface to create /proc/net/dev
- */
-static int dev_seq_show(struct seq_file *seq, void *v)
-{
-	if (v == SEQ_START_TOKEN)
-		seq_puts(seq, "Inter-|   Receive                            "
-			      "                    |  Transmit\n"
-			      " face |bytes    packets errs drop fifo frame "
-			      "compressed multicast|bytes    packets errs "
-			      "drop fifo colls carrier compressed\n");
-	else
-		dev_seq_printf_stats(seq, v);
-	return 0;
-}
-
-static struct softnet_data *softnet_get_online(loff_t *pos)
-{
-	struct softnet_data *sd = NULL;
-
-	while (*pos < nr_cpu_ids)
-		if (cpu_online(*pos)) {
-			sd = &per_cpu(softnet_data, *pos);
-			break;
-		} else
-			++*pos;
-	return sd;
-}
-
-static void *softnet_seq_start(struct seq_file *seq, loff_t *pos)
-{
-	return softnet_get_online(pos);
-}
-
-static void *softnet_seq_next(struct seq_file *seq, void *v, loff_t *pos)
-{
-	++*pos;
-	return softnet_get_online(pos);
-}
-
-static void softnet_seq_stop(struct seq_file *seq, void *v)
-{
-}
-
-static int softnet_seq_show(struct seq_file *seq, void *v)
-{
-	struct softnet_data *sd = v;
-
-	seq_printf(seq, "%08x %08x %08x %08x %08x %08x %08x %08x %08x %08x\n",
-		   sd->processed, sd->dropped, sd->time_squeeze, 0,
-		   0, 0, 0, 0, /* was fastroute */
-		   sd->cpu_collision, sd->received_rps);
-	return 0;
-}
-
-static const struct seq_operations dev_seq_ops = {
-	.start = dev_seq_start,
-	.next  = dev_seq_next,
-	.stop  = dev_seq_stop,
-	.show  = dev_seq_show,
-};
-
-static int dev_seq_open(struct inode *inode, struct file *file)
-{
-	return seq_open_net(inode, file, &dev_seq_ops,
-			    sizeof(struct seq_net_private));
-}
-
-static const struct file_operations dev_seq_fops = {
-	.owner	 = THIS_MODULE,
-	.open    = dev_seq_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release_net,
-};
-
-static const struct seq_operations softnet_seq_ops = {
-	.start = softnet_seq_start,
-	.next  = softnet_seq_next,
-	.stop  = softnet_seq_stop,
-	.show  = softnet_seq_show,
-};
-
-static int softnet_seq_open(struct inode *inode, struct file *file)
-{
-	return seq_open(file, &softnet_seq_ops);
-}
-
-static const struct file_operations softnet_seq_fops = {
-	.owner	 = THIS_MODULE,
-	.open    = softnet_seq_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release,
-};
-
-static void *ptype_get_idx(loff_t pos)
-{
-	struct packet_type *pt = NULL;
-	loff_t i = 0;
-	int t;
-
-	list_for_each_entry_rcu(pt, &ptype_all, list) {
-		if (i == pos)
-			return pt;
-		++i;
-	}
-
-	for (t = 0; t < PTYPE_HASH_SIZE; t++) {
-		list_for_each_entry_rcu(pt, &ptype_base[t], list) {
-			if (i == pos)
-				return pt;
-			++i;
-		}
-	}
-	return NULL;
-}
-
-static void *ptype_seq_start(struct seq_file *seq, loff_t *pos)
-	__acquires(RCU)
-{
-	rcu_read_lock();
-	return *pos ? ptype_get_idx(*pos - 1) : SEQ_START_TOKEN;
-}
-
-static void *ptype_seq_next(struct seq_file *seq, void *v, loff_t *pos)
-{
-	struct packet_type *pt;
-	struct list_head *nxt;
-	int hash;
-
-	++*pos;
-	if (v == SEQ_START_TOKEN)
-		return ptype_get_idx(0);
-
-	pt = v;
-	nxt = pt->list.next;
-	if (pt->type == htons(ETH_P_ALL)) {
-		if (nxt != &ptype_all)
-			goto found;
-		hash = 0;
-		nxt = ptype_base[0].next;
-	} else
-		hash = ntohs(pt->type) & PTYPE_HASH_MASK;
-
-	while (nxt == &ptype_base[hash]) {
-		if (++hash >= PTYPE_HASH_SIZE)
-			return NULL;
-		nxt = ptype_base[hash].next;
-	}
-found:
-	return list_entry(nxt, struct packet_type, list);
-}
-
-static void ptype_seq_stop(struct seq_file *seq, void *v)
-	__releases(RCU)
-{
-	rcu_read_unlock();
-}
-
-static int ptype_seq_show(struct seq_file *seq, void *v)
-{
-	struct packet_type *pt = v;
-
-	if (v == SEQ_START_TOKEN)
-		seq_puts(seq, "Type Device      Function\n");
-	else if (pt->dev == NULL || dev_net(pt->dev) == seq_file_net(seq)) {
-		if (pt->type == htons(ETH_P_ALL))
-			seq_puts(seq, "ALL ");
-		else
-			seq_printf(seq, "%04x", ntohs(pt->type));
-
-		seq_printf(seq, " %-8s %pF\n",
-			   pt->dev ? pt->dev->name : "", pt->func);
-	}
-
-	return 0;
-}
-
-static const struct seq_operations ptype_seq_ops = {
-	.start = ptype_seq_start,
-	.next  = ptype_seq_next,
-	.stop  = ptype_seq_stop,
-	.show  = ptype_seq_show,
-};
-
-static int ptype_seq_open(struct inode *inode, struct file *file)
-{
-	return seq_open_net(inode, file, &ptype_seq_ops,
-			sizeof(struct seq_net_private));
-}
-
-static const struct file_operations ptype_seq_fops = {
-	.owner	 = THIS_MODULE,
-	.open    = ptype_seq_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release_net,
-};
-
-
-static int __net_init dev_proc_net_init(struct net *net)
-{
-	int rc = -ENOMEM;
-
-	if (!proc_net_fops_create(net, "dev", S_IRUGO, &dev_seq_fops))
-		goto out;
-	if (!proc_net_fops_create(net, "softnet_stat", S_IRUGO, &softnet_seq_fops))
-		goto out_dev;
-	if (!proc_net_fops_create(net, "ptype", S_IRUGO, &ptype_seq_fops))
-		goto out_softnet;
-
-	if (wext_proc_init(net))
-		goto out_ptype;
-	rc = 0;
-out:
-	return rc;
-out_ptype:
-	proc_net_remove(net, "ptype");
-out_softnet:
-	proc_net_remove(net, "softnet_stat");
-out_dev:
-	proc_net_remove(net, "dev");
-	goto out;
-}
-
-static void __net_exit dev_proc_net_exit(struct net *net)
-{
-	wext_proc_exit(net);
-
-	proc_net_remove(net, "ptype");
-	proc_net_remove(net, "softnet_stat");
-	proc_net_remove(net, "dev");
-}
-
-static struct pernet_operations __net_initdata dev_proc_ops = {
-	.init = dev_proc_net_init,
-	.exit = dev_proc_net_exit,
-};
-
-static int __init dev_proc_init(void)
-{
-	return register_pernet_subsys(&dev_proc_ops);
-}
-#else
-#define dev_proc_init() 0
-#endif	/* CONFIG_PROC_FS */
-
 
 struct netdev_upper {
 	struct net_device *dev;
@@ -5380,375 +4798,6 @@ int dev_change_carrier(struct net_device *dev, bool new_carrier)
 	return ops->ndo_change_carrier(dev, new_carrier);
 }
 EXPORT_SYMBOL(dev_change_carrier);
-
-/*
- *	Perform the SIOCxIFxxx calls, inside rcu_read_lock()
- */
-static int dev_ifsioc_locked(struct net *net, struct ifreq *ifr, unsigned int cmd)
-{
-	int err;
-	struct net_device *dev = dev_get_by_name_rcu(net, ifr->ifr_name);
-
-	if (!dev)
-		return -ENODEV;
-
-	switch (cmd) {
-	case SIOCGIFFLAGS:	/* Get interface flags */
-		ifr->ifr_flags = (short) dev_get_flags(dev);
-		return 0;
-
-	case SIOCGIFMETRIC:	/* Get the metric on the interface
-				   (currently unused) */
-		ifr->ifr_metric = 0;
-		return 0;
-
-	case SIOCGIFMTU:	/* Get the MTU of a device */
-		ifr->ifr_mtu = dev->mtu;
-		return 0;
-
-	case SIOCGIFHWADDR:
-		if (!dev->addr_len)
-			memset(ifr->ifr_hwaddr.sa_data, 0, sizeof ifr->ifr_hwaddr.sa_data);
-		else
-			memcpy(ifr->ifr_hwaddr.sa_data, dev->dev_addr,
-			       min(sizeof ifr->ifr_hwaddr.sa_data, (size_t) dev->addr_len));
-		ifr->ifr_hwaddr.sa_family = dev->type;
-		return 0;
-
-	case SIOCGIFSLAVE:
-		err = -EINVAL;
-		break;
-
-	case SIOCGIFMAP:
-		ifr->ifr_map.mem_start = dev->mem_start;
-		ifr->ifr_map.mem_end   = dev->mem_end;
-		ifr->ifr_map.base_addr = dev->base_addr;
-		ifr->ifr_map.irq       = dev->irq;
-		ifr->ifr_map.dma       = dev->dma;
-		ifr->ifr_map.port      = dev->if_port;
-		return 0;
-
-	case SIOCGIFINDEX:
-		ifr->ifr_ifindex = dev->ifindex;
-		return 0;
-
-	case SIOCGIFTXQLEN:
-		ifr->ifr_qlen = dev->tx_queue_len;
-		return 0;
-
-	default:
-		/* dev_ioctl() should ensure this case
-		 * is never reached
-		 */
-		WARN_ON(1);
-		err = -ENOTTY;
-		break;
-
-	}
-	return err;
-}
-
-/*
- *	Perform the SIOCxIFxxx calls, inside rtnl_lock()
- */
-static int dev_ifsioc(struct net *net, struct ifreq *ifr, unsigned int cmd)
-{
-	int err;
-	struct net_device *dev = __dev_get_by_name(net, ifr->ifr_name);
-	const struct net_device_ops *ops;
-
-	if (!dev)
-		return -ENODEV;
-
-	ops = dev->netdev_ops;
-
-	switch (cmd) {
-	case SIOCSIFFLAGS:	/* Set interface flags */
-		return dev_change_flags(dev, ifr->ifr_flags);
-
-	case SIOCSIFMETRIC:	/* Set the metric on the interface
-				   (currently unused) */
-		return -EOPNOTSUPP;
-
-	case SIOCSIFMTU:	/* Set the MTU of a device */
-		return dev_set_mtu(dev, ifr->ifr_mtu);
-
-	case SIOCSIFHWADDR:
-		return dev_set_mac_address(dev, &ifr->ifr_hwaddr);
-
-	case SIOCSIFHWBROADCAST:
-		if (ifr->ifr_hwaddr.sa_family != dev->type)
-			return -EINVAL;
-		memcpy(dev->broadcast, ifr->ifr_hwaddr.sa_data,
-		       min(sizeof ifr->ifr_hwaddr.sa_data, (size_t) dev->addr_len));
-		call_netdevice_notifiers(NETDEV_CHANGEADDR, dev);
-		return 0;
-
-	case SIOCSIFMAP:
-		if (ops->ndo_set_config) {
-			if (!netif_device_present(dev))
-				return -ENODEV;
-			return ops->ndo_set_config(dev, &ifr->ifr_map);
-		}
-		return -EOPNOTSUPP;
-
-	case SIOCADDMULTI:
-		if (!ops->ndo_set_rx_mode ||
-		    ifr->ifr_hwaddr.sa_family != AF_UNSPEC)
-			return -EINVAL;
-		if (!netif_device_present(dev))
-			return -ENODEV;
-		return dev_mc_add_global(dev, ifr->ifr_hwaddr.sa_data);
-
-	case SIOCDELMULTI:
-		if (!ops->ndo_set_rx_mode ||
-		    ifr->ifr_hwaddr.sa_family != AF_UNSPEC)
-			return -EINVAL;
-		if (!netif_device_present(dev))
-			return -ENODEV;
-		return dev_mc_del_global(dev, ifr->ifr_hwaddr.sa_data);
-
-	case SIOCSIFTXQLEN:
-		if (ifr->ifr_qlen < 0)
-			return -EINVAL;
-		dev->tx_queue_len = ifr->ifr_qlen;
-		return 0;
-
-	case SIOCSIFNAME:
-		ifr->ifr_newname[IFNAMSIZ-1] = '\0';
-		return dev_change_name(dev, ifr->ifr_newname);
-
-	case SIOCSHWTSTAMP:
-		err = net_hwtstamp_validate(ifr);
-		if (err)
-			return err;
-		/* fall through */
-
-	/*
-	 *	Unknown or private ioctl
-	 */
-	default:
-		if ((cmd >= SIOCDEVPRIVATE &&
-		    cmd <= SIOCDEVPRIVATE + 15) ||
-		    cmd == SIOCBONDENSLAVE ||
-		    cmd == SIOCBONDRELEASE ||
-		    cmd == SIOCBONDSETHWADDR ||
-		    cmd == SIOCBONDSLAVEINFOQUERY ||
-		    cmd == SIOCBONDINFOQUERY ||
-		    cmd == SIOCBONDCHANGEACTIVE ||
-		    cmd == SIOCGMIIPHY ||
-		    cmd == SIOCGMIIREG ||
-		    cmd == SIOCSMIIREG ||
-		    cmd == SIOCBRADDIF ||
-		    cmd == SIOCBRDELIF ||
-		    cmd == SIOCSHWTSTAMP ||
-		    cmd == SIOCWANDEV) {
-			err = -EOPNOTSUPP;
-			if (ops->ndo_do_ioctl) {
-				if (netif_device_present(dev))
-					err = ops->ndo_do_ioctl(dev, ifr, cmd);
-				else
-					err = -ENODEV;
-			}
-		} else
-			err = -EINVAL;
-
-	}
-	return err;
-}
-
-/*
- *	This function handles all "interface"-type I/O control requests. The actual
- *	'doing' part of this is dev_ifsioc above.
- */
-
-/**
- *	dev_ioctl	-	network device ioctl
- *	@net: the applicable net namespace
- *	@cmd: command to issue
- *	@arg: pointer to a struct ifreq in user space
- *
- *	Issue ioctl functions to devices. This is normally called by the
- *	user space syscall interfaces but can sometimes be useful for
- *	other purposes. The return value is the return from the syscall if
- *	positive or a negative errno code on error.
- */
-
-int dev_ioctl(struct net *net, unsigned int cmd, void __user *arg)
-{
-	struct ifreq ifr;
-	int ret;
-	char *colon;
-
-	/* One special case: SIOCGIFCONF takes ifconf argument
-	   and requires shared lock, because it sleeps writing
-	   to user space.
-	 */
-
-	if (cmd == SIOCGIFCONF) {
-		rtnl_lock();
-		ret = dev_ifconf(net, (char __user *) arg);
-		rtnl_unlock();
-		return ret;
-	}
-	if (cmd == SIOCGIFNAME)
-		return dev_ifname(net, (struct ifreq __user *)arg);
-
-	if (copy_from_user(&ifr, arg, sizeof(struct ifreq)))
-		return -EFAULT;
-
-	ifr.ifr_name[IFNAMSIZ-1] = 0;
-
-	colon = strchr(ifr.ifr_name, ':');
-	if (colon)
-		*colon = 0;
-
-	/*
-	 *	See which interface the caller is talking about.
-	 */
-
-	switch (cmd) {
-	/*
-	 *	These ioctl calls:
-	 *	- can be done by all.
-	 *	- atomic and do not require locking.
-	 *	- return a value
-	 */
-	case SIOCGIFFLAGS:
-	case SIOCGIFMETRIC:
-	case SIOCGIFMTU:
-	case SIOCGIFHWADDR:
-	case SIOCGIFSLAVE:
-	case SIOCGIFMAP:
-	case SIOCGIFINDEX:
-	case SIOCGIFTXQLEN:
-		dev_load(net, ifr.ifr_name);
-		rcu_read_lock();
-		ret = dev_ifsioc_locked(net, &ifr, cmd);
-		rcu_read_unlock();
-		if (!ret) {
-			if (colon)
-				*colon = ':';
-			if (copy_to_user(arg, &ifr,
-					 sizeof(struct ifreq)))
-				ret = -EFAULT;
-		}
-		return ret;
-
-	case SIOCETHTOOL:
-		dev_load(net, ifr.ifr_name);
-		rtnl_lock();
-		ret = dev_ethtool(net, &ifr);
-		rtnl_unlock();
-		if (!ret) {
-			if (colon)
-				*colon = ':';
-			if (copy_to_user(arg, &ifr,
-					 sizeof(struct ifreq)))
-				ret = -EFAULT;
-		}
-		return ret;
-
-	/*
-	 *	These ioctl calls:
-	 *	- require superuser power.
-	 *	- require strict serialization.
-	 *	- return a value
-	 */
-	case SIOCGMIIPHY:
-	case SIOCGMIIREG:
-	case SIOCSIFNAME:
-		if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
-			return -EPERM;
-		dev_load(net, ifr.ifr_name);
-		rtnl_lock();
-		ret = dev_ifsioc(net, &ifr, cmd);
-		rtnl_unlock();
-		if (!ret) {
-			if (colon)
-				*colon = ':';
-			if (copy_to_user(arg, &ifr,
-					 sizeof(struct ifreq)))
-				ret = -EFAULT;
-		}
-		return ret;
-
-	/*
-	 *	These ioctl calls:
-	 *	- require superuser power.
-	 *	- require strict serialization.
-	 *	- do not return a value
-	 */
-	case SIOCSIFMAP:
-	case SIOCSIFTXQLEN:
-		if (!capable(CAP_NET_ADMIN))
-			return -EPERM;
-		/* fall through */
-	/*
-	 *	These ioctl calls:
-	 *	- require local superuser power.
-	 *	- require strict serialization.
-	 *	- do not return a value
-	 */
-	case SIOCSIFFLAGS:
-	case SIOCSIFMETRIC:
-	case SIOCSIFMTU:
-	case SIOCSIFHWADDR:
-	case SIOCSIFSLAVE:
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-	case SIOCSIFHWBROADCAST:
-	case SIOCSMIIREG:
-	case SIOCBONDENSLAVE:
-	case SIOCBONDRELEASE:
-	case SIOCBONDSETHWADDR:
-	case SIOCBONDCHANGEACTIVE:
-	case SIOCBRADDIF:
-	case SIOCBRDELIF:
-	case SIOCSHWTSTAMP:
-		if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
-			return -EPERM;
-		/* fall through */
-	case SIOCBONDSLAVEINFOQUERY:
-	case SIOCBONDINFOQUERY:
-		dev_load(net, ifr.ifr_name);
-		rtnl_lock();
-		ret = dev_ifsioc(net, &ifr, cmd);
-		rtnl_unlock();
-		return ret;
-
-	case SIOCGIFMEM:
-		/* Get the per device memory space. We can add this but
-		 * currently do not support it */
-	case SIOCSIFMEM:
-		/* Set the per device memory buffer space.
-		 * Not applicable in our case */
-	case SIOCSIFLINK:
-		return -ENOTTY;
-
-	/*
-	 *	Unknown or private ioctl.
-	 */
-	default:
-		if (cmd == SIOCWANDEV ||
-		    (cmd >= SIOCDEVPRIVATE &&
-		     cmd <= SIOCDEVPRIVATE + 15)) {
-			dev_load(net, ifr.ifr_name);
-			rtnl_lock();
-			ret = dev_ifsioc(net, &ifr, cmd);
-			rtnl_unlock();
-			if (!ret && copy_to_user(arg, &ifr,
-						 sizeof(struct ifreq)))
-				ret = -EFAULT;
-			return ret;
-		}
-		/* Take care of Wireless Extensions */
-		if (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST)
-			return wext_handle_ioctl(net, &ifr, cmd, arg);
-		return -ENOTTY;
-	}
-}
-
 
 /**
  *	dev_new_index	-	allocate an ifindex
@@ -7212,7 +6261,6 @@ static int __init net_dev_init(void)
 
 	hotcpu_notifier(dev_cpu_callback, 0);
 	dst_init();
-	dev_mcast_init();
 	rc = 0;
 out:
 	return rc;

@@ -38,8 +38,8 @@
 
 #define _QLCNIC_LINUX_MAJOR 5
 #define _QLCNIC_LINUX_MINOR 1
-#define _QLCNIC_LINUX_SUBVERSION 33
-#define QLCNIC_LINUX_VERSIONID  "5.1.33"
+#define _QLCNIC_LINUX_SUBVERSION 35
+#define QLCNIC_LINUX_VERSIONID  "5.1.35"
 #define QLCNIC_DRV_IDC_VER  0x01
 #define QLCNIC_DRIVER_VERSION  ((_QLCNIC_LINUX_MAJOR << 16) |\
 		 (_QLCNIC_LINUX_MINOR << 8) | (_QLCNIC_LINUX_SUBVERSION))
@@ -1008,9 +1008,12 @@ struct qlcnic_adapter {
 	struct delayed_work idc_aen_work;
 
 	struct qlcnic_filter_hash fhash;
+	struct qlcnic_filter_hash rx_fhash;
 
 	spinlock_t tx_clean_lock;
 	spinlock_t mac_learn_lock;
+	/* spinlock for catching rcv filters for eswitch traffic */
+	spinlock_t rx_mac_learn_lock;
 	u32 file_prd_off;	/*File fw product offset*/
 	u32 fw_version;
 	const struct firmware *fw;
@@ -1506,6 +1509,8 @@ int qlcnic_init_pci_info(struct qlcnic_adapter *);
 int qlcnic_set_default_offload_settings(struct qlcnic_adapter *);
 int qlcnic_reset_npar_config(struct qlcnic_adapter *);
 int qlcnic_set_eswitch_port_config(struct qlcnic_adapter *);
+void qlcnic_add_lb_filter(struct qlcnic_adapter *, struct sk_buff *, int,
+			  __le16);
 /*
  * QLOGIC Board information
  */
@@ -1750,7 +1755,7 @@ static inline int qlcnic_set_lb_mode(struct qlcnic_adapter *adapter, u8 mode)
 
 static inline int qlcnic_clear_lb_mode(struct qlcnic_adapter *adapter, u8 mode)
 {
-	return adapter->ahw->hw_ops->config_loopback(adapter, mode);
+	return adapter->ahw->hw_ops->clear_loopback(adapter, mode);
 }
 
 static inline int qlcnic_nic_set_promisc(struct qlcnic_adapter *adapter,

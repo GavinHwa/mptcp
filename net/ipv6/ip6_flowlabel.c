@@ -806,15 +806,15 @@ static const struct file_operations ip6fl_seq_fops = {
 
 static int __net_init ip6_flowlabel_proc_init(struct net *net)
 {
-	if (!proc_net_fops_create(net, "ip6_flowlabel",
-				  S_IRUGO, &ip6fl_seq_fops))
+	if (!proc_create("ip6_flowlabel", S_IRUGO, net->proc_net,
+			 &ip6fl_seq_fops))
 		return -ENOMEM;
 	return 0;
 }
 
 static void __net_exit ip6_flowlabel_proc_fini(struct net *net)
 {
-	proc_net_remove(net, "ip6_flowlabel");
+	remove_proc_entry("ip6_flowlabel", net->proc_net);
 }
 #else
 static inline int ip6_flowlabel_proc_init(struct net *net)

@@ -223,6 +223,7 @@ struct qlc_83xx_idc {
 #define QLC_83XX_GET_LSO_CAPABILITY(val)		(val & 0x40)
 #define QLC_83XX_GET_HW_LRO_CAPABILITY(val)		(val & 0x400)
 #define QLC_83XX_GET_VLAN_ALIGN_CAPABILITY(val)	(val & 0x4000)
+#define QLC_83XX_GET_FW_LRO_MSS_CAPABILITY(val)	(val & 0x20000)
 #define QLC_83XX_VIRTUAL_NIC_MODE			0xFF
 #define QLC_83XX_DEFAULT_MODE				0x0
 #define QLCNIC_BRDTYPE_83XX_10G			0x0083
@@ -368,8 +369,11 @@ irqreturn_t qlcnic_83xx_handle_aen(int, void *);
 int qlcnic_83xx_get_port_info(struct qlcnic_adapter *);
 void qlcnic_83xx_enable_mbx_intrpt(struct qlcnic_adapter *);
 irqreturn_t qlcnic_83xx_clear_legacy_intr(struct qlcnic_adapter *);
+irqreturn_t qlcnic_83xx_intr(int, void *);
 irqreturn_t qlcnic_83xx_tmp_intr(int, void *);
 void qlcnic_83xx_enable_intr(struct qlcnic_adapter *,
+			     struct qlcnic_host_sds_ring *);
+void qlcnic_83xx_disable_intr(struct qlcnic_adapter *,
 			     struct qlcnic_host_sds_ring *);
 void qlcnic_83xx_check_vf(struct qlcnic_adapter *,
 			  const struct pci_device_id *);

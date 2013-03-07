@@ -839,8 +839,9 @@ static int __init af_rxrpc_init(void)
 	}
 
 #ifdef CONFIG_PROC_FS
-	proc_net_fops_create(&init_net, "rxrpc_calls", 0, &rxrpc_call_seq_fops);
-	proc_net_fops_create(&init_net, "rxrpc_conns", 0, &rxrpc_connection_seq_fops);
+	proc_create("rxrpc_calls", 0, init_net.proc_net, &rxrpc_call_seq_fops);
+	proc_create("rxrpc_conns", 0, init_net.proc_net,
+		    &rxrpc_connection_seq_fops);
 #endif
 	return 0;
 
@@ -878,8 +879,8 @@ static void __exit af_rxrpc_exit(void)
 
 	_debug("flush scheduled work");
 	flush_workqueue(rxrpc_workqueue);
-	proc_net_remove(&init_net, "rxrpc_conns");
-	proc_net_remove(&init_net, "rxrpc_calls");
+	remove_proc_entry("rxrpc_conns", init_net.proc_net);
+	remove_proc_entry("rxrpc_calls", init_net.proc_net);
 	destroy_workqueue(rxrpc_workqueue);
 	kmem_cache_destroy(rxrpc_call_jar);
 	_leave("");

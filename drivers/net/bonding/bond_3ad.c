@@ -389,13 +389,13 @@ static u8 __get_duplex(struct port *port)
 
 /**
  * __initialize_port_locks - initialize a port's STATE machine spinlock
- * @port: the port we're looking at
+ * @port: the slave of the port we're looking at
  *
  */
-static inline void __initialize_port_locks(struct port *port)
+static inline void __initialize_port_locks(struct slave *slave)
 {
 	// make sure it isn't called twice
-	spin_lock_init(&(SLAVE_AD_INFO(port->slave).state_machine_lock));
+	spin_lock_init(&(SLAVE_AD_INFO(slave).state_machine_lock));
 }
 
 //conversions
@@ -1910,6 +1910,7 @@ int bond_3ad_bind_slave(struct slave *slave)
 
 		ad_initialize_port(port, bond->params.lacp_fast);
 
+		__initialize_port_locks(slave);
 		port->slave = slave;
 		port->actor_port_number = SLAVE_AD_INFO(slave).id;
 		// key is determined according to the link speed, duplex and user key(which is yet not supported)
@@ -1932,8 +1933,6 @@ int bond_3ad_bind_slave(struct slave *slave)
 		port->next_port_in_aggregator = NULL;
 
 		__disable_port(port);
-		__initialize_port_locks(port);
-
 
 		// aggregator initialization
 		aggregator = &(SLAVE_AD_INFO(slave).aggregator);
@@ -2494,11 +2493,13 @@ void bond_3ad_update_lacp_rate(struct bonding *bond)
 	struct port *port = NULL;
 	int lacp_fast;
 
-	read_lock(&bond->lock);
+	write_lock_bh(&bond->lock);
 	lacp_fast = bond->params.lacp_fast;
 
 	bond_for_each_slave(bond, slave, i) {
 		port = &(SLAVE_AD_INFO(slave).port);
+		if (port->slave == NULL)
+			continue;
 		__get_state_machine_lock(port);
 		if (lacp_fast)
 			port->actor_oper_port_state |= AD_STATE_LACP_TIMEOUT;
@@ -2507,5 +2508,5 @@ void bond_3ad_update_lacp_rate(struct bonding *bond)
 		__release_state_machine_lock(port);
 	}
 
-	read_unlock(&bond->lock);
+	write_unlock_bh(&bond->lock);
 }

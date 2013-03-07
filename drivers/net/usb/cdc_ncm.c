@@ -576,9 +576,14 @@ static int cdc_ncm_bind(struct usbnet *dev, struct usb_interface *intf)
 	if ((intf->num_altsetting == 2) &&
 	    !usb_set_interface(dev->udev,
 			       intf->cur_altsetting->desc.bInterfaceNumber,
-			       CDC_NCM_COMM_ALTSETTING_MBIM) &&
-	    cdc_ncm_comm_intf_is_mbim(intf->cur_altsetting))
-		return -ENODEV;
+			       CDC_NCM_COMM_ALTSETTING_MBIM)) {
+		if (cdc_ncm_comm_intf_is_mbim(intf->cur_altsetting))
+			return -ENODEV;
+		else
+			usb_set_interface(dev->udev,
+					  intf->cur_altsetting->desc.bInterfaceNumber,
+					  CDC_NCM_COMM_ALTSETTING_NCM);
+	}
 #endif
 
 	/* NCM data altsetting is always 1 */
@@ -1206,6 +1211,14 @@ static const struct usb_device_id cdc_devs[] = {
 	  .bInterfaceSubClass = USB_CDC_SUBCLASS_NCM,
 	  .bInterfaceProtocol = USB_CDC_PROTO_NONE,
 	  .driver_info = (unsigned long) &wwan_info,
+	},
+
+	/* tag Huawei devices as wwan */
+	{ USB_VENDOR_AND_INTERFACE_INFO(0x12d1,
+					USB_CLASS_COMM,
+					USB_CDC_SUBCLASS_NCM,
+					USB_CDC_PROTO_NONE),
+	  .driver_info = (unsigned long)&wwan_info,
 	},
 
 	/* Huawei NCM devices disguised as vendor specific */

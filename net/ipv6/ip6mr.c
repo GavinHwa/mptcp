@@ -1359,9 +1359,9 @@ static int __net_init ip6mr_net_init(struct net *net)
 
 #ifdef CONFIG_PROC_FS
 	err = -ENOMEM;
-	if (!proc_net_fops_create(net, "ip6_mr_vif", 0, &ip6mr_vif_fops))
+	if (!proc_create("ip6_mr_vif", 0, net->proc_net, &ip6mr_vif_fops))
 		goto proc_vif_fail;
-	if (!proc_net_fops_create(net, "ip6_mr_cache", 0, &ip6mr_mfc_fops))
+	if (!proc_create("ip6_mr_cache", 0, net->proc_net, &ip6mr_mfc_fops))
 		goto proc_cache_fail;
 #endif
 
@@ -1369,7 +1369,7 @@ static int __net_init ip6mr_net_init(struct net *net)
 
 #ifdef CONFIG_PROC_FS
 proc_cache_fail:
-	proc_net_remove(net, "ip6_mr_vif");
+	remove_proc_entry("ip6_mr_vif", net->proc_net);
 proc_vif_fail:
 	ip6mr_rules_exit(net);
 #endif
@@ -1380,8 +1380,8 @@ fail:
 static void __net_exit ip6mr_net_exit(struct net *net)
 {
 #ifdef CONFIG_PROC_FS
-	proc_net_remove(net, "ip6_mr_cache");
-	proc_net_remove(net, "ip6_mr_vif");
+	remove_proc_entry("ip6_mr_cache", net->proc_net);
+	remove_proc_entry("ip6_mr_vif", net->proc_net);
 #endif
 	ip6mr_rules_exit(net);
 }

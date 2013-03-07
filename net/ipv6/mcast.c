@@ -2599,10 +2599,10 @@ static int __net_init igmp6_proc_init(struct net *net)
 	int err;
 
 	err = -ENOMEM;
-	if (!proc_net_fops_create(net, "igmp6", S_IRUGO, &igmp6_mc_seq_fops))
+	if (!proc_create("igmp6", S_IRUGO, net->proc_net, &igmp6_mc_seq_fops))
 		goto out;
-	if (!proc_net_fops_create(net, "mcfilter6", S_IRUGO,
-				  &igmp6_mcf_seq_fops))
+	if (!proc_create("mcfilter6", S_IRUGO, net->proc_net,
+			 &igmp6_mcf_seq_fops))
 		goto out_proc_net_igmp6;
 
 	err = 0;
@@ -2610,14 +2610,14 @@ out:
 	return err;
 
 out_proc_net_igmp6:
-	proc_net_remove(net, "igmp6");
+	remove_proc_entry("igmp6", net->proc_net);
 	goto out;
 }
 
 static void __net_exit igmp6_proc_exit(struct net *net)
 {
-	proc_net_remove(net, "mcfilter6");
-	proc_net_remove(net, "igmp6");
+	remove_proc_entry("mcfilter6", net->proc_net);
+	remove_proc_entry("igmp6", net->proc_net);
 }
 #else
 static inline int igmp6_proc_init(struct net *net)

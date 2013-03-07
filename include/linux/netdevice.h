@@ -1475,6 +1475,11 @@ static inline void *netdev_priv(const struct net_device *dev)
  */
 #define SET_NETDEV_DEVTYPE(net, devtype)	((net)->dev.type = (devtype))
 
+/* Default NAPI poll() weight
+ * Device drivers are strongly advised to not use bigger value
+ */
+#define NAPI_POLL_WEIGHT 64
+
 /**
  *	netif_napi_add - initialize a napi context
  *	@dev:  network device
@@ -2646,7 +2651,6 @@ extern void		netdev_notify_peers(struct net_device *dev);
 extern void		netdev_features_change(struct net_device *dev);
 /* Load a device via the kmod */
 extern void		dev_load(struct net *net, const char *name);
-extern void		dev_mcast_init(void);
 extern struct rtnl_link_stats64 *dev_get_stats(struct net_device *dev,
 					       struct rtnl_link_stats64 *storage);
 extern void netdev_stats_to_stats64(struct rtnl_link_stats64 *stats64,
@@ -2692,9 +2696,9 @@ extern void		net_enable_timestamp(void);
 extern void		net_disable_timestamp(void);
 
 #ifdef CONFIG_PROC_FS
-extern void *dev_seq_start(struct seq_file *seq, loff_t *pos);
-extern void *dev_seq_next(struct seq_file *seq, void *v, loff_t *pos);
-extern void dev_seq_stop(struct seq_file *seq, void *v);
+extern int __init dev_proc_init(void);
+#else
+#define dev_proc_init() 0
 #endif
 
 extern int netdev_class_create_file(struct class_attribute *class_attr);
@@ -2895,5 +2899,35 @@ do {								\
 	0;							\
 })
 #endif
+
+/*
+ *	The list of packet types we will receive (as opposed to discard)
+ *	and the routines to invoke.
+ *
+ *	Why 16. Because with 16 the only overlap we get on a hash of the
+ *	low nibble of the protocol value is RARP/SNAP/X.25.
+ *
+ *      NOTE:  That is no longer true with the addition of VLAN tags.  Not
+ *             sure which should go first, but I bet it won't make much
+ *             difference if we are running VLANs.  The good news is that
+ *             this protocol won't be in the list unless compiled in, so
+ *             the average user (w/out VLANs) will not be adversely affected.
+ *             --BLG
+ *
+ *		0800	IP
+ *		8100    802.1Q VLAN
+ *		0001	802.3
+ *		0002	AX.25
+ *		0004	802.2
+ *		8035	RARP
+ *		0005	SNAP
+ *		0805	X.25
+ *		0806	ARP
+ *		8137	IPX
+ *		0009	Localtalk
+ *		86DD	IPv6
+ */
+#define PTYPE_HASH_SIZE	(16)
+#define PTYPE_HASH_MASK	(PTYPE_HASH_SIZE - 1)
 
 #endif	/* _LINUX_NETDEVICE_H */
