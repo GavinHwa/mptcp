@@ -2342,3 +2342,11 @@ int mptcp_trim_head(struct sock *sk, struct sk_buff *skb, u32 len)
 
 	return 0;
 }
+
+void mptcp_release_cb(struct sock *meta_sk)
+{
+	struct sock *sk;
+
+	mptcp_for_each_sk(tcp_sk(meta_sk)->mpcb, sk)
+		tcp_release_cb(sk);
+}

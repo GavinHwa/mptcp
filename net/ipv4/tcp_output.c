@@ -932,6 +932,9 @@ void tcp_release_cb(struct sock *sk)
 	struct tcp_sock *tp = tcp_sk(sk);
 	unsigned long flags, nflags;
 
+	if (is_meta_sk(sk))
+		mptcp_release_cb(sk);
+
 	/* perform an atomic operation only if at least one flag is set */
 	do {
 		flags = tp->tsq_flags;

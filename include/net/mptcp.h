@@ -700,6 +700,7 @@ int mptcp_rcv_synsent_state_process(struct sock *sk, struct sock **skptr,
 				    struct mptcp_options_received *mopt);
 unsigned int mptcp_xmit_size_goal(struct sock *meta_sk, u32 mss_now,
 				  int large_allowed);
+void mptcp_release_cb(struct sock *meta_sk);
 
 static inline bool mptcp_can_sendpage(struct sock *sk)
 {
@@ -1315,6 +1316,7 @@ static inline bool mptcp_can_sendpage(struct sock *sk)
 {
 	return false;
 }
+static inline void mptcp_release_cb(struct sock *meta_sk) {}
 #endif /* CONFIG_MPTCP */
 
 #endif /* _MPTCP_H */
