@@ -503,9 +503,9 @@ static bool team_dummy_transmit(struct team *team, struct sk_buff *skb)
 	return false;
 }
 
-rx_handler_result_t team_dummy_receive(struct team *team,
-				       struct team_port *port,
-				       struct sk_buff *skb)
+static rx_handler_result_t team_dummy_receive(struct team *team,
+					      struct team_port *port,
+					      struct sk_buff *skb)
 {
 	return RX_HANDLER_ANOTHER;
 }
@@ -1151,6 +1151,8 @@ static int team_port_del(struct team *team, struct net_device *port_dev)
 	netdev_upper_dev_unlink(port_dev, dev);
 	team_port_disable_netpoll(port);
 	vlan_vids_del_by_dev(port_dev, dev);
+	dev_uc_unsync(port_dev, dev);
+	dev_mc_unsync(port_dev, dev);
 	dev_close(port_dev);
 	team_port_leave(team, port);
 

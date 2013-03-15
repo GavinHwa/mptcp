@@ -820,6 +820,20 @@ static u16 vxlan_src_port(const struct vxlan_dev *vxlan, struct sk_buff *skb)
 	return (((u64) hash * range) >> 32) + vxlan->port_min;
 }
 
+static int handle_offloads(struct sk_buff *skb)
+{
+	if (skb_is_gso(skb)) {
+		int err = skb_unclone(skb, GFP_ATOMIC);
+		if (unlikely(err))
+			return err;
+
+		skb_shinfo(skb)->gso_type |= (SKB_GSO_UDP_TUNNEL | SKB_GSO_UDP);
+	} else if (skb->ip_summed != CHECKSUM_PARTIAL)
+		skb->ip_summed = CHECKSUM_NONE;
+
+	return 0;
+}
+
 /* Transmit local packets over Vxlan
  *
  * Outer IP header inherits ECN and DF from inner header.
@@ -841,7 +855,6 @@ static netdev_tx_t vxlan_xmit(struct sk_buff *skb, struct net_device *dev)
 	__u16 src_port;
 	__be16 df = 0;
 	__u8 tos, ttl;
-	int err;
 	bool did_rsc = false;
 	const struct vxlan_fdb *f;
 
@@ -961,24 +974,14 @@ static netdev_tx_t vxlan_xmit(struct sk_buff *skb, struct net_device *dev)
 	iph->ttl	= ttl ? : ip4_dst_hoplimit(&rt->dst);
 	tunnel_ip_select_ident(skb, old_iph, &rt->dst);
 
+	nf_reset(skb);
+
 	vxlan_set_owner(dev, skb);
 
-	/* See iptunnel_xmit() */
-	if (skb->ip_summed != CHECKSUM_PARTIAL)
-		skb->ip_summed = CHECKSUM_NONE;
+	if (handle_offloads(skb))
+		goto drop;
 
-	err = ip_local_out(skb);
-	if (likely(net_xmit_eval(err) == 0)) {
-		struct vxlan_stats *stats = this_cpu_ptr(vxlan->stats);
-
-		u64_stats_update_begin(&stats->syncp);
-		stats->tx_packets++;
-		stats->tx_bytes += pkt_len;
-		u64_stats_update_end(&stats->syncp);
-	} else {
-		dev->stats.tx_errors++;
-		dev->stats.tx_aborted_errors++;
-	}
+	iptunnel_xmit(skb, dev);
 	return NETDEV_TX_OK;
 
 drop:
@@ -1187,8 +1190,10 @@ static void vxlan_setup(struct net_device *dev)
 	dev->features	|= NETIF_F_NETNS_LOCAL;
 	dev->features	|= NETIF_F_SG | NETIF_F_HW_CSUM;
 	dev->features   |= NETIF_F_RXCSUM;
+	dev->features   |= NETIF_F_GSO_SOFTWARE;
 
 	dev->hw_features |= NETIF_F_SG | NETIF_F_HW_CSUM | NETIF_F_RXCSUM;
+	dev->hw_features |= NETIF_F_GSO_SOFTWARE;
 	dev->priv_flags	&= ~IFF_XMIT_DST_RELEASE;
 	dev->priv_flags |= IFF_LIVE_ADDR_CHANGE;
 
@@ -1504,6 +1509,14 @@ static __net_init int vxlan_init_net(struct net *net)
 static __net_exit void vxlan_exit_net(struct net *net)
 {
 	struct vxlan_net *vn = net_generic(net, vxlan_net_id);
+	struct vxlan_dev *vxlan;
+	unsigned h;
+
+	rtnl_lock();
+	for (h = 0; h < VNI_HASH_SIZE; ++h)
+		hlist_for_each_entry(vxlan, &vn->vni_list[h], hlist)
+			dev_close(vxlan->dev);
+	rtnl_unlock();
 
 	if (vn->sock) {
 		sk_release_kernel(vn->sock->sk);

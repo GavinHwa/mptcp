@@ -409,14 +409,12 @@ static void __tun_detach(struct tun_file *tfile, bool clean)
 {
 	struct tun_file *ntfile;
 	struct tun_struct *tun;
-	struct net_device *dev;
 
 	tun = rtnl_dereference(tfile->tun);
 
 	if (tun && !tfile->detached) {
 		u16 index = tfile->queue_index;
 		BUG_ON(index >= tun->numqueues);
-		dev = tun->dev;
 
 		rcu_assign_pointer(tun->tfiles[index],
 				   tun->tfiles[tun->numqueues - 1]);
@@ -746,6 +744,8 @@ static netdev_tx_t tun_net_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (unlikely(skb_orphan_frags(skb, GFP_ATOMIC)))
 		goto drop;
 	skb_orphan(skb);
+
+	nf_reset(skb);
 
 	/* Enqueue packet */
 	skb_queue_tail(&tfile->socket.sk->sk_receive_queue, skb);
