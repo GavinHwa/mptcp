@@ -287,7 +287,7 @@ struct sock *mptcp_v6v4_syn_recv_sock(struct sock *meta_sk, struct sk_buff *skb,
 	if (tcp_rsk(req)->snt_synack)
 		tcp_valid_rtt_meas(newsk,
 				   tcp_time_stamp - tcp_rsk(req)->snt_synack);
-	newtp->total_retrans = req->retrans;
+	newtp->total_retrans = req->num_retrans;
 
 	newinet->inet_daddr = LOOPBACK4_IPV6;
 	newinet->inet_saddr = LOOPBACK4_IPV6;
@@ -332,7 +332,7 @@ static void mptcp_v6_join_request(struct sock *meta_sk, struct sk_buff *skb)
 	mptcp_init_mp_opt(&mopt);
 	tmp_opt.mss_clamp = TCP_MSS_DEFAULT;
 	tmp_opt.user_mss  = tcp_sk(meta_sk)->rx_opt.user_mss;
-	tcp_parse_options(skb, &tmp_opt, &hash_location, &mopt, 0);
+	tcp_parse_options(skb, &tmp_opt, &hash_location, &mopt, 0, NULL);
 
 	req = inet6_reqsk_alloc(&mptcp6_request_sock_ops);
 	if (!req)
@@ -346,7 +346,7 @@ static void mptcp_v6_join_request(struct sock *meta_sk, struct sk_buff *skb)
 	treq->loc_addr = ipv6_hdr(skb)->daddr;
 
 	if (!want_cookie || tmp_opt.tstamp_ok)
-		TCP_ECN_create_request(req, skb);
+		TCP_ECN_create_request(req, skb, sock_net(meta_sk));
 
 	treq->iif = meta_sk->sk_bound_dev_if;
 

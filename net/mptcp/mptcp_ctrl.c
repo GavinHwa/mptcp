@@ -525,6 +525,7 @@ static int mptcp_inherit_sk(const struct sock *sk, struct sock *newsk,
 				   af_callback_keys + newsk->sk_family,
 				   af_family_clock_key_strings[newsk->sk_family]);
 	newsk->sk_dst_cache	= NULL;
+	newsk->sk_rx_dst	= NULL;
 	newsk->sk_wmem_queued	= 0;
 	newsk->sk_forward_alloc = 0;
 	newsk->sk_send_head	= NULL;
@@ -895,11 +896,6 @@ void mptcp_del_sock(struct sock *sk)
 	if (!tp->mptcp || !tp->mptcp->attached)
 		return;
 
-	if (tp->mptcp->pre_established) {
-		tp->mptcp->pre_established = 0;
-		sk_stop_timer(sk, &tp->mptcp->mptcp_ack_timer);
-	}
-
 	mpcb = tp->mpcb;
 	tp_prev = mpcb->connection_list;
 
@@ -929,7 +925,8 @@ void mptcp_del_sock(struct sock *sk)
 
 	if (is_master_tp(tp))
 		mpcb->master_sk = NULL;
-	else
+	else if (tp->mptcp->mptcp_ack_timer.data)
+		/* May not be initiated, if we are on the server-side */
 		sk_stop_timer(sk, &tp->mptcp->mptcp_ack_timer);
 
 	rcu_assign_pointer(inet_sk(sk)->inet_opt, NULL);
@@ -1557,7 +1554,6 @@ struct sock *mptcp_check_req_child(struct sock *meta_sk, struct sock *child,
 	 * some of the fields
 	 */
 	child_tp->mptcp->rcv_low_prio = mtreq->low_prio;
-	child->sk_sndmsg_page = NULL;
 
 	child_tp->mptcp->slave_sk = 1;
 	child_tp->mptcp->snt_isn = tcp_rsk(req)->snt_isn;

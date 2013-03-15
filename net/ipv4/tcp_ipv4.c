@@ -794,7 +794,7 @@ static void tcp_v4_send_ack(struct sk_buff *skb, u32 seq, u32 ack, u32 data_ack,
 #endif
 #ifdef CONFIG_MPTCP
 	if (mptcp) {
-		int offset = (ts) ? 3 : 0;
+		int offset = (tsecr) ? 3 : 0;
 		/* Construction of 32-bit data_ack */
 		rep.opt[offset++] = htonl((TCPOPT_MPTCP << 24) |
 					  ((MPTCP_SUB_LEN_DSS + MPTCP_SUB_LEN_ACK) << 16) |
