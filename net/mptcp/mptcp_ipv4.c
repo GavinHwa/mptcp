@@ -459,6 +459,10 @@ int mptcp_init4_subsockets(struct sock *meta_sk, const struct mptcp_loc4 *loc,
 	/* Don't try again - even if it fails */
 	rem->bitfield |= (1 << loc->id);
 
+	/* DO PREVENT SUBFLOWS THAT ARE NOT IN THE SAME /24 SUBNET */
+	if ((rem->addr.s_addr & 0x00FFFFFF) ^ (loc->addr.s_addr & 0x00FFFFFF))
+		return 0;
+
 	/** First, create and prepare the new socket */
 
 	sock.type = meta_sk->sk_socket->type;
