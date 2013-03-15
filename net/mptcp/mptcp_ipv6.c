@@ -37,6 +37,7 @@
 #include <net/inet6_hashtables.h>
 #include <net/inet_common.h>
 #include <net/ipv6.h>
+#include <net/ip6_checksum.h>
 #include <net/ip6_route.h>
 #include <net/mptcp.h>
 #include <net/mptcp_pm.h>
@@ -163,7 +164,7 @@ static int mptcp_v6v4_send_synack(struct sock *meta_sk, struct request_sock *req
 		dst = NULL;
 		goto done;
 	}
-	skb = tcp_make_synack(meta_sk, dst, req, rvp);
+	skb = tcp_make_synack(meta_sk, dst, req, rvp, NULL);
 	err = -ENOMEM;
 	if (skb) {
 		__tcp_v6_send_check(skb, &treq->loc_addr, &treq->rmt_addr);
@@ -324,6 +325,7 @@ static void mptcp_v6_join_request(struct sock *meta_sk, struct sk_buff *skb)
 	u8 mptcp_hash_mac[20];
 	__u32 isn = TCP_SKB_CB(skb)->when;
 	struct dst_entry *dst = NULL;
+	struct flowi6 fl6;
 	int want_cookie = 0;
 
 	tcp_clear_options(&tmp_opt);
@@ -354,8 +356,6 @@ static void mptcp_v6_join_request(struct sock *meta_sk, struct sk_buff *skb)
 		treq->iif = inet6_iif(skb);
 
 	if (!isn) {
-		struct inet_peer *peer = NULL;
-
 		if (meta_sk->sk_family == AF_INET6 &&
 		    (ipv6_opt_accepted(meta_sk, skb) ||
 		    np->rxopt.bits.rxinfo || np->rxopt.bits.rxoinfo ||
@@ -375,14 +375,8 @@ static void mptcp_v6_join_request(struct sock *meta_sk, struct sk_buff *skb)
 		 */
 		if (tmp_opt.saw_tstamp &&
 		    tcp_death_row.sysctl_tw_recycle &&
-		    (dst = inet6_csk_route_req(meta_sk, req)) != NULL &&
-		    (peer = rt6_get_peer((struct rt6_info *)dst)) != NULL &&
-		    ipv6_addr_equal((struct in6_addr *)peer->daddr.addr.a6,
-				    &treq->rmt_addr)) {
-			inet_peer_refcheck(peer);
-			if ((u32)get_seconds() - peer->tcp_ts_stamp < TCP_PAWS_MSL &&
-			    (s32)(peer->tcp_ts - req->ts_recent) >
-							TCP_PAWS_WINDOW) {
+		    (dst = inet6_csk_route_req(meta_sk, &fl6, req)) != NULL) {
+			if (!tcp_peer_is_proven(req, dst, true)) {
 				NET_INC_STATS_BH(sock_net(meta_sk), LINUX_MIB_PAWSPASSIVEREJECTED);
 				goto drop_and_release;
 			}
@@ -391,8 +385,7 @@ static void mptcp_v6_join_request(struct sock *meta_sk, struct sk_buff *skb)
 		else if (!sysctl_tcp_syncookies &&
 			 (sysctl_max_syn_backlog - inet_csk_reqsk_queue_len(meta_sk) <
 			  (sysctl_max_syn_backlog >> 2)) &&
-			 (!peer || !peer->tcp_ts_stamp) &&
-			 (!dst || !dst_metric(dst, RTAX_RTT))) {
+			 !tcp_peer_is_proven(req, dst, false)) {
 			/* Without syncookies last quarter of
 			 * backlog is filled with destinations,
 			 * proven to be alive.
@@ -431,7 +424,8 @@ static void mptcp_v6_join_request(struct sock *meta_sk, struct sk_buff *skb)
 	tcp_rsk(req)->saw_mpc = 1;
 
 	if (meta_sk->sk_family == AF_INET6) {
-		if (tcp_v6_send_synack(meta_sk, req, NULL, skb_get_queue_mapping(skb)))
+		if (tcp_v6_send_synack(meta_sk, dst, &fl6, req,
+				       NULL, skb_get_queue_mapping(skb)))
 			goto drop_and_free;
 	} else {
 		if (mptcp_v6v4_send_synack(meta_sk, req, NULL, skb_get_queue_mapping(skb)))

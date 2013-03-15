@@ -1243,6 +1243,7 @@ static void set_multicast_list(struct net_device *dev)
 {
 	struct net_local *lp = netdev_priv(dev);
 	unsigned long flags;
+	u16 cfg;
 
 	spin_lock_irqsave(&lp->lock, flags);
 	if (dev->flags & IFF_PROMISC)
@@ -1260,11 +1261,10 @@ static void set_multicast_list(struct net_device *dev)
 	/* in promiscuous mode, we accept errored packets,
 	 * so we have to enable interrupts on them also
 	 */
-	writereg(dev, PP_RxCFG,
-		 (lp->curr_rx_cfg |
-		  (lp->rx_mode == RX_ALL_ACCEPT)
-		  ? (RX_CRC_ERROR_ENBL | RX_RUNT_ENBL | RX_EXTRA_DATA_ENBL)
-		  : 0));
+	cfg = lp->curr_rx_cfg;
+	if (lp->rx_mode == RX_ALL_ACCEPT)
+		cfg |= RX_CRC_ERROR_ENBL | RX_RUNT_ENBL | RX_EXTRA_DATA_ENBL;
+	writereg(dev, PP_RxCFG, cfg);
 	spin_unlock_irqrestore(&lp->lock, flags);
 }
 
@@ -1978,18 +1978,6 @@ static struct platform_driver cs89x0_driver = {
 	.remove	= cs89x0_platform_remove,
 };
 
-static int __init cs89x0_init(void)
-{
-	return platform_driver_probe(&cs89x0_driver, cs89x0_platform_probe);
-}
-
-module_init(cs89x0_init);
-
-static void __exit cs89x0_cleanup(void)
-{
-	platform_driver_unregister(&cs89x0_driver);
-}
-
-module_exit(cs89x0_cleanup);
+module_platform_driver_probe(cs89x0_driver, cs89x0_platform_probe);
 
 #endif /* CONFIG_CS89x0_PLATFORM */

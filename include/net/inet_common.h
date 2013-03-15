@@ -20,9 +20,11 @@ extern int inet_create(struct net *net, struct socket *sock, int protocol,
 extern int inet6_create(struct net *net, struct socket *sock, int protocol,
 			int kern);
 extern int inet_release(struct socket *sock);
-extern int inet_stream_connect(struct socket *sock, struct sockaddr * uaddr,
+extern int inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
 			       int addr_len, int flags);
-extern int inet_dgram_connect(struct socket *sock, struct sockaddr * uaddr,
+extern int __inet_stream_connect(struct socket *sock, struct sockaddr *uaddr,
+				 int addr_len, int flags);
+extern int inet_dgram_connect(struct socket *sock, struct sockaddr *uaddr,
 			      int addr_len, int flags);
 extern int inet_accept(struct socket *sock, struct socket *newsock, int flags);
 extern int inet_sendmsg(struct kiocb *iocb, struct socket *sock,

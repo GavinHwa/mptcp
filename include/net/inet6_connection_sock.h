@@ -28,6 +28,7 @@ extern int inet6_csk_bind_conflict(const struct sock *sk,
 extern u32 inet6_synq_hash(const struct in6_addr *raddr, const __be16 rport,
 			   const u32 rnd, const u32 synq_hsize);
 extern struct dst_entry* inet6_csk_route_req(struct sock *sk,
+					     struct flowi6 *fl6,
 					     const struct request_sock *req);
 
 extern struct request_sock *inet6_csk_search_req(const struct sock *sk,
@@ -44,4 +45,6 @@ extern void inet6_csk_reqsk_queue_hash_add(struct sock *sk,
 extern void inet6_csk_addr2sockaddr(struct sock *sk, struct sockaddr *uaddr);
 
 extern int inet6_csk_xmit(struct sk_buff *skb, struct flowi *fl);
+
+extern struct dst_entry *inet6_csk_update_pmtu(struct sock *sk, u32 mtu);
 #endif /* _INET6_CONNECTION_SOCK_H */

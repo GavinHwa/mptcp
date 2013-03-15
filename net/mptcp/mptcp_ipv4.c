@@ -140,7 +140,7 @@ static void mptcp_v4_join_request(struct sock *meta_sk, struct sk_buff *skb)
 	ireq->loc_addr = daddr;
 	ireq->rmt_addr = saddr;
 	ireq->no_srccheck = inet_sk(meta_sk)->transparent;
-	ireq->opt = tcp_v4_save_options(meta_sk, skb);
+	ireq->opt = tcp_v4_save_options(skb);
 
 	if (security_inet_conn_request(meta_sk, skb, req))
 		goto drop_and_free;
@@ -149,7 +149,6 @@ static void mptcp_v4_join_request(struct sock *meta_sk, struct sk_buff *skb)
 		TCP_ECN_create_request(req, skb);
 
 	if (!isn) {
-		struct inet_peer *peer = NULL;
 		struct flowi4 fl4;
 
 		/* VJ's idea. We save last timestamp seen
@@ -164,12 +163,8 @@ static void mptcp_v4_join_request(struct sock *meta_sk, struct sk_buff *skb)
 		if (tmp_opt.saw_tstamp &&
 		    tcp_death_row.sysctl_tw_recycle &&
 		    (dst = inet_csk_route_req(meta_sk, &fl4, req)) != NULL &&
-		    fl4.daddr == saddr &&
-		    (peer = rt_get_peer((struct rtable *)dst, fl4.daddr)) != NULL) {
-			inet_peer_refcheck(peer);
-			if ((u32)get_seconds() - peer->tcp_ts_stamp < TCP_PAWS_MSL &&
-			    (s32)(peer->tcp_ts - req->ts_recent) >
-							TCP_PAWS_WINDOW) {
+		    fl4.daddr == saddr) {
+			if (!tcp_peer_is_proven(req, dst, true)) {
 				NET_INC_STATS_BH(sock_net(meta_sk), LINUX_MIB_PAWSPASSIVEREJECTED);
 				goto drop_and_release;
 			}
@@ -178,8 +173,7 @@ static void mptcp_v4_join_request(struct sock *meta_sk, struct sk_buff *skb)
 		else if (!sysctl_tcp_syncookies &&
 			 (sysctl_max_syn_backlog - inet_csk_reqsk_queue_len(meta_sk) <
 			  (sysctl_max_syn_backlog >> 2)) &&
-			 (!peer || !peer->tcp_ts_stamp) &&
-			 (!dst || !dst_metric(dst, RTAX_RTT))) {
+			 !tcp_peer_is_proven(req, dst, false)) {
 			/* Without syncookies last quarter of
 			 * backlog is filled with destinations,
 			 * proven to be alive.
@@ -187,7 +181,7 @@ static void mptcp_v4_join_request(struct sock *meta_sk, struct sk_buff *skb)
 			 * to destinations, already remembered
 			 * to the moment of synflood.
 			 */
-			LIMIT_NETDEBUG(KERN_DEBUG "TCP: drop open request from %pI4/%u\n",
+			LIMIT_NETDEBUG(KERN_DEBUG pr_fmt("drop open request from %pI4/%u\n"),
 				       &saddr, ntohs(tcp_hdr(skb)->source));
 			goto drop_and_release;
 		}
@@ -215,7 +209,7 @@ static void mptcp_v4_join_request(struct sock *meta_sk, struct sk_buff *skb)
 	mtreq->low_prio = mopt.low_prio;
 	tcp_rsk(req)->saw_mpc = 1;
 
-	if (tcp_v4_send_synack(meta_sk, dst, req, NULL, skb_get_queue_mapping(skb)))
+	if (tcp_v4_send_synack(meta_sk, dst, req, NULL, skb_get_queue_mapping(skb), want_cookie))
 		goto drop_and_free;
 
 	/* Adding to request queue in metasocket */
