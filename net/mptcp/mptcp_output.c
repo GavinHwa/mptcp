@@ -1079,7 +1079,7 @@ retrans:
 		mptcp_for_each_tp(tp->mpcb, tp_it) {
 			if (tp_it != tp &&
 			    TCP_SKB_CB(skb_head)->path_mask & mptcp_pi_to_flag(tp_it->mptcp->path_index)) {
-				if (tp_it->snd_cwnd <= 4) {
+				if (tp_it->snd_cwnd <= 20) {
 					do_retrans = 1;
 					break;
 				}
