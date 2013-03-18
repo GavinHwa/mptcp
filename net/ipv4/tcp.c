@@ -837,7 +837,10 @@ static int tcp_send_mss(struct sock *sk, int *size_goal, int flags)
 	int mss_now;
 
 	if (tcp_sk(sk)->mpc) {
-		mss_now = mptcp_current_mss(sk);
+		mss_now = 0; /* Fix compiler warning about non-init mss_now */
+
+		if (!get_available_subflow(sk, NULL, &mss_now))
+			mss_now = mptcp_current_mss(sk);
 		*size_goal = mptcp_xmit_size_goal(sk, mss_now, !(flags & MSG_OOB));
 	} else {
 		mss_now = tcp_current_mss(sk);

@@ -115,9 +115,8 @@ static int mptcp_dont_reinject_skb(struct tcp_sock *tp, struct sk_buff *skb)
  *
  * Additionally, this function is aware of the backup-subflows.
  */
-static struct sock *get_available_subflow(struct sock *meta_sk,
-					  struct sk_buff *skb,
-					  unsigned int *mss_now)
+struct sock *get_available_subflow(struct sock *meta_sk, struct sk_buff *skb,
+				   unsigned int *mss_now)
 {
 	struct mptcp_cb *mpcb = tcp_sk(meta_sk)->mpcb;
 	struct sock *sk, *bestsk = NULL, *lowpriosk = NULL, *backupsk = NULL;
