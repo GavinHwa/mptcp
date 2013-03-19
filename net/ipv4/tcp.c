@@ -837,10 +837,16 @@ static int tcp_send_mss(struct sock *sk, int *size_goal, int flags)
 	int mss_now;
 
 	if (tcp_sk(sk)->mpc) {
-		mss_now = 0; /* Fix compiler warning about non-init mss_now */
+		struct sock *subsk;
+		mss_now = 0;
 
-		if (!get_available_subflow(sk, NULL, &mss_now))
-			mss_now = mptcp_current_mss(sk);
+		mptcp_for_each_sk(tcp_sk(sk)->mpcb, subsk) {
+			if (!mptcp_sk_can_send(subsk))
+				continue;
+
+			if (!mss_now || tcp_sk(subsk)->mss_cache < mss_now)
+				mss_now = tcp_sk(subsk)->mss_cache;
+		}
 		*size_goal = mptcp_xmit_size_goal(sk, mss_now, !(flags & MSG_OOB));
 	} else {
 		mss_now = tcp_current_mss(sk);
