@@ -397,7 +397,7 @@ static void tcp_v6_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 				sock_hold(sk);
 			if (tp->mpc)
 				set_bit(TCP_MTU_REDUCED_DEFERRED,
-					&mptcp_meta_tp(tp)->tsq_flags)
+					&mptcp_meta_tp(tp)->tsq_flags);
 		}
 		goto out;
 	}
